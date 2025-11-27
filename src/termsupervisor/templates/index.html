@@ -2,6 +2,7 @@
 <html>
 <head>
     <title>TermSupervisor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -215,6 +216,11 @@
             border-color: #58a6ff !important;
             animation: none !important;
         }
+        /* 当前激活的 pane - 橙色边框 */
+        .pane.active {
+            border-color: #d29922 !important;
+            box-shadow: 0 0 8px rgba(210, 153, 34, 0.5);
+        }
         .status {
             position: fixed;
             bottom: 20px;
@@ -309,6 +315,88 @@
             color: #fff;
         }
         .modal-btn:hover { opacity: 0.9; }
+
+        /* 移动端响应式 */
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+                font-size: 16px;
+            }
+            h1 {
+                font-size: 20px;
+            }
+            .header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 10px;
+            }
+            .config-box {
+                font-size: 16px;
+            }
+            .config-box select {
+                font-size: 16px;
+                padding: 8px 12px;
+            }
+            .window {
+                padding: 10px;
+            }
+            .window-title {
+                font-size: 16px;
+                padding: 10px;
+            }
+            .add-tab-btn {
+                font-size: 14px;
+                padding: 8px 14px;
+            }
+            /* tab 宽度由 JS 动态计算，不覆盖 */
+            .tab-title {
+                font-size: 15px;
+                padding: 10px;
+            }
+            .pane {
+                font-size: 14px;
+            }
+            .panes-container {
+                min-height: 120px;
+            }
+            .status {
+                font-size: 14px;
+                padding: 12px 16px;
+            }
+            .context-menu {
+                min-width: 180px;
+            }
+            .context-menu-item {
+                padding: 12px 20px;
+                font-size: 16px;
+            }
+            .modal {
+                margin: 20px;
+                min-width: auto;
+                width: calc(100% - 40px);
+            }
+            .modal h3 {
+                font-size: 18px;
+            }
+            .modal input {
+                font-size: 16px;
+                padding: 12px;
+            }
+            .modal-btn {
+                font-size: 16px;
+                padding: 10px 20px;
+            }
+            .layout-option {
+                width: 60px;
+                height: 50px;
+            }
+            .add-tab-dropdown-inner {
+                padding: 12px;
+            }
+            .layout-grid {
+                gap: 10px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -561,6 +649,208 @@
         let isHoveringDropdown = false;
         let pendingLayout = null;
 
+        // 布局选项配置
+        const LAYOUT_OPTIONS = [
+            { name: 'single', html: '<div class="row"><div class="cell"></div></div>' },
+            { name: '2rows', html: '<div class="row"><div class="cell"></div></div><div class="row"><div class="cell"></div></div>' },
+            { name: '2cols', html: '<div class="row"><div class="cell"></div><div class="cell"></div></div>' },
+            { name: '2x2', html: '<div class="row"><div class="cell"></div><div class="cell"></div></div><div class="row"><div class="cell"></div><div class="cell"></div></div>' },
+            { name: '2cols-right2rows', html: '<div class="row" style="flex:1"><div class="cell"></div><div style="flex:1;display:flex;flex-direction:column;gap:2px"><div class="cell" style="flex:1"></div><div class="cell" style="flex:1"></div></div></div>' },
+            { name: '2rows-bottom2cols', html: '<div class="row"><div class="cell"></div></div><div class="row"><div class="cell"></div><div class="cell"></div></div>' }
+        ];
+
+        // ==================== 创建元素函数 ====================
+
+        function createAddTabDropdown(windowId) {
+            const addTabWrapper = document.createElement('div');
+            addTabWrapper.className = 'add-tab-wrapper';
+
+            const addTabBtn = document.createElement('button');
+            addTabBtn.className = 'add-tab-btn';
+            addTabBtn.textContent = '+ Tab';
+            addTabWrapper.appendChild(addTabBtn);
+
+            const dropdown = document.createElement('div');
+            dropdown.className = 'add-tab-dropdown';
+
+            const layoutGrid = document.createElement('div');
+            layoutGrid.className = 'layout-grid';
+
+            LAYOUT_OPTIONS.forEach(layout => {
+                const option = document.createElement('div');
+                option.className = 'layout-option';
+                option.title = layout.name;
+                option.innerHTML = layout.html;
+
+                option.onclick = (e) => {
+                    e.stopPropagation();
+                    ws.send(JSON.stringify({
+                        action: 'create_tab',
+                        window_id: windowId,
+                        layout: layout.name
+                    }));
+                };
+
+                layoutGrid.appendChild(option);
+            });
+
+            const dropdownInner = document.createElement('div');
+            dropdownInner.className = 'add-tab-dropdown-inner';
+            dropdownInner.appendChild(layoutGrid);
+            dropdown.appendChild(dropdownInner);
+
+            // hover 时暂停渲染，离开时恢复
+            addTabWrapper.onmouseenter = () => {
+                isHoveringDropdown = true;
+            };
+            addTabWrapper.onmouseleave = () => {
+                isHoveringDropdown = false;
+                if (pendingLayout) {
+                    currentLayout = pendingLayout;
+                    pendingLayout = null;
+                    render();
+                }
+            };
+
+            addTabWrapper.appendChild(dropdown);
+            return addTabWrapper;
+        }
+
+        function createWindowElement(windowData) {
+            const windowEl = document.createElement('div');
+            windowEl.className = 'window';
+            windowEl.dataset.windowId = windowData.window_id;
+
+            const titleEl = document.createElement('div');
+            titleEl.className = 'window-title';
+
+            const titleText = document.createElement('span');
+            titleText.className = 'window-title-text';
+            titleText.textContent = windowData.name || 'Window';
+            titleText.oncontextmenu = (e) => showContextMenu(e, 'window', windowData.window_id, windowData.name);
+            titleEl.appendChild(titleText);
+
+            titleEl.appendChild(createAddTabDropdown(windowData.window_id));
+            windowEl.appendChild(titleEl);
+
+            return windowEl;
+        }
+
+        function createTabElement(tabData) {
+            const tabEl = document.createElement('div');
+            tabEl.className = 'tab-display-wrapper';
+            tabEl.dataset.tabId = tabData.tab_id;
+
+            // 动态计算宽度
+            const gapPx = 15;
+            const widthPercent = 100 / tabsPerRow;
+            const gapOffset = gapPx * (tabsPerRow - 1) / tabsPerRow;
+            tabEl.style.flex = `0 0 calc(${widthPercent}% - ${gapOffset}px)`;
+            tabEl.style.maxWidth = `calc(${widthPercent}% - ${gapOffset}px)`;
+
+            const tabTitleEl = document.createElement('div');
+            tabTitleEl.className = 'tab-title';
+            tabTitleEl.textContent = tabData.name || 'Tab';
+            tabTitleEl.oncontextmenu = (e) => showContextMenu(e, 'tab', tabData.tab_id, tabData.name);
+            tabEl.appendChild(tabTitleEl);
+
+            const panesContainer = document.createElement('div');
+            panesContainer.className = 'panes-container';
+            tabEl.appendChild(panesContainer);
+
+            return tabEl;
+        }
+
+        function createPaneElement(paneData, layoutInfo) {
+            const { minX, minY, totalWidth, totalHeight, padding } = layoutInfo;
+
+            const paneEl = document.createElement('div');
+            paneEl.className = 'pane';
+            paneEl.dataset.sessionId = paneData.session_id;
+
+            const left = ((paneData.x - minX) / totalWidth) * 100;
+            const top = ((paneData.y - minY) / totalHeight) * 100;
+            const width = (paneData.width / totalWidth) * 100;
+            const height = (paneData.height / totalHeight) * 100;
+
+            paneEl.style.left = `calc(${left}% + ${padding}px)`;
+            paneEl.style.top = `calc(${top}% + ${padding}px)`;
+            paneEl.style.width = `calc(${width}% - ${padding * 2}px)`;
+            paneEl.style.height = `calc(${height}% - ${padding * 2}px)`;
+
+            paneEl.innerHTML = `<div><strong>#${paneData.index}</strong><br>${paneData.name || 'Pane'}</div>`;
+
+            const debugInfo = `Raw: ${Math.round(paneData.x)},${Math.round(paneData.y)} ${Math.round(paneData.width)}x${Math.round(paneData.height)}\nCalc: ${left.toFixed(1)}%, ${top.toFixed(1)}%`;
+            paneEl.title = `[${paneData.index}] ${paneData.session_id}\n${debugInfo}`;
+
+            paneEl.onclick = () => {
+                clearLongRunning(paneData.session_id);
+                ws.send('activate:' + paneData.session_id);
+            };
+            paneEl.oncontextmenu = (e) => showContextMenu(e, 'session', paneData.session_id, paneData.name);
+
+            return paneEl;
+        }
+
+        // ==================== 更新元素函数 ====================
+
+        function updateWindowTitle(windowEl, windowData) {
+            const titleText = windowEl.querySelector('.window-title-text');
+            if (titleText && titleText.textContent !== (windowData.name || 'Window')) {
+                titleText.textContent = windowData.name || 'Window';
+            }
+        }
+
+        function updateTabTitle(tabEl, tabData) {
+            const titleEl = tabEl.querySelector('.tab-title');
+            if (titleEl && titleEl.textContent !== (tabData.name || 'Tab')) {
+                titleEl.textContent = tabData.name || 'Tab';
+            }
+        }
+
+        function updatePaneStatus(paneEl, sessionId, updatedSessions, activeSessionId) {
+            const shouldBeUpdated = updatedSessions.includes(sessionId);
+            const shouldBeLongRunning = isLongRunningCompleted(sessionId);
+            const shouldBeActive = sessionId === activeSessionId;
+
+            // 更新 active 状态
+            if (shouldBeActive) {
+                paneEl.classList.add('active');
+            } else {
+                paneEl.classList.remove('active');
+            }
+
+            // 更新 long-running 状态
+            if (shouldBeLongRunning) {
+                paneEl.classList.add('long-running');
+                paneEl.classList.remove('updated');
+            } else {
+                paneEl.classList.remove('long-running');
+                // 更新 updated 状态
+                if (shouldBeUpdated && !paneEl.classList.contains('updated')) {
+                    paneEl.classList.add('updated');
+                } else if (!shouldBeUpdated) {
+                    paneEl.classList.remove('updated');
+                }
+            }
+        }
+
+        function getLayoutInfo(panes) {
+            const minX = Math.min(...panes.map(p => p.x));
+            const minY = Math.min(...panes.map(p => p.y));
+            const maxX = Math.max(...panes.map(p => p.x + p.width));
+            const maxY = Math.max(...panes.map(p => p.y + p.height));
+            return {
+                minX, minY,
+                totalWidth: maxX - minX || 1,
+                totalHeight: maxY - minY || 1,
+                aspectRatio: (maxY - minY) / (maxX - minX) || 1,
+                padding: 2
+            };
+        }
+
+        // ==================== 增量渲染主函数 ====================
+
         function render() {
             // 如果正在 hover 下拉菜单，延迟渲染
             if (isHoveringDropdown) {
@@ -569,187 +859,135 @@
             }
 
             const container = document.getElementById('windows');
-            container.innerHTML = '';
+            const updatedSessions = currentLayout.updated_sessions || [];
+            const activeSessionId = currentLayout.active_session_id || null;
 
-            console.group('Render Layout');
-
-            currentLayout.windows.forEach((window, windowIndex) => {
-                const windowEl = document.createElement('div');
-                windowEl.className = 'window';
-
-                const titleEl = document.createElement('div');
-                titleEl.className = 'window-title';
-
-                const titleText = document.createElement('span');
-                titleText.className = 'window-title-text';
-                titleText.textContent = window.name || 'Window';
-                titleText.oncontextmenu = (e) => showContextMenu(e, 'window', window.window_id, window.name);
-                titleEl.appendChild(titleText);
-
-                const addTabWrapper = document.createElement('div');
-                addTabWrapper.className = 'add-tab-wrapper';
-
-                const addTabBtn = document.createElement('button');
-                addTabBtn.className = 'add-tab-btn';
-                addTabBtn.textContent = '+ Tab';
-                addTabWrapper.appendChild(addTabBtn);
-
-                const dropdown = document.createElement('div');
-                dropdown.className = 'add-tab-dropdown';
-
-                const layoutGrid = document.createElement('div');
-                layoutGrid.className = 'layout-grid';
-
-                // 布局选项
-                const layouts = [
-                    { name: 'single', html: '<div class="row"><div class="cell"></div></div>' },
-                    { name: '2rows', html: '<div class="row"><div class="cell"></div></div><div class="row"><div class="cell"></div></div>' },
-                    { name: '2cols', html: '<div class="row"><div class="cell"></div><div class="cell"></div></div>' },
-                    { name: '2x2', html: '<div class="row"><div class="cell"></div><div class="cell"></div></div><div class="row"><div class="cell"></div><div class="cell"></div></div>' },
-                    { name: '2cols-right2rows', html: '<div class="row" style="flex:1"><div class="cell"></div><div style="flex:1;display:flex;flex-direction:column;gap:2px"><div class="cell" style="flex:1"></div><div class="cell" style="flex:1"></div></div></div>' },
-                    { name: '2rows-bottom2cols', html: '<div class="row"><div class="cell"></div></div><div class="row"><div class="cell"></div><div class="cell"></div></div>' }
-                ];
-
-                layouts.forEach(layout => {
-                    const option = document.createElement('div');
-                    option.className = 'layout-option';
-                    option.title = layout.name;
-                    option.innerHTML = layout.html;
-
-                    option.onclick = (e) => {
-                        e.stopPropagation();
-                        ws.send(JSON.stringify({
-                            action: 'create_tab',
-                            window_id: window.window_id,
-                            layout: layout.name
-                        }));
-                    };
-
-                    layoutGrid.appendChild(option);
-                });
-
-                const dropdownInner = document.createElement('div');
-                dropdownInner.className = 'add-tab-dropdown-inner';
-                dropdownInner.appendChild(layoutGrid);
-                dropdown.appendChild(dropdownInner);
-
-                // hover 时暂停渲染，离开时恢复
-                addTabWrapper.onmouseenter = () => {
-                    isHoveringDropdown = true;
-                };
-                addTabWrapper.onmouseleave = () => {
-                    isHoveringDropdown = false;
-                    if (pendingLayout) {
-                        currentLayout = pendingLayout;
-                        pendingLayout = null;
-                        render();
-                    }
-                };
-
-                addTabWrapper.appendChild(dropdown);
-                titleEl.appendChild(addTabWrapper);
-
-                windowEl.appendChild(titleEl);
-
-                // 直接遍历所有 tab，并显示其 pane 布局
-                window.tabs.forEach((tab, tabIndex) => {
-                    const tabDisplayWrapperEl = document.createElement('div');
-                    tabDisplayWrapperEl.className = 'tab-display-wrapper';
-                    // 动态计算宽度
-                    const gapPx = 15; // gap in pixels
-                    const widthPercent = 100 / tabsPerRow;
-                    const gapOffset = gapPx * (tabsPerRow - 1) / tabsPerRow;
-                    tabDisplayWrapperEl.style.flex = `0 0 calc(${widthPercent}% - ${gapOffset}px)`;
-                    tabDisplayWrapperEl.style.maxWidth = `calc(${widthPercent}% - ${gapOffset}px)`;
-
-                    const tabTitleEl = document.createElement('div');
-                    tabTitleEl.className = 'tab-title';
-                    tabTitleEl.textContent = tab.name || 'Tab';
-                    tabTitleEl.oncontextmenu = (e) => showContextMenu(e, 'tab', tab.tab_id, tab.name);
-                    tabDisplayWrapperEl.appendChild(tabTitleEl);
-
-                    const panesContainer = document.createElement('div');
-                    panesContainer.className = 'panes-container';
-
-                    if (tab.panes.length > 0) {
-                        const minX = Math.min(...tab.panes.map(p => p.x));
-                        const minY = Math.min(...tab.panes.map(p => p.y));
-                        const maxX = Math.max(...tab.panes.map(p => p.x + p.width));
-                        const maxY = Math.max(...tab.panes.map(p => p.y + p.height));
-                        const totalWidth = maxX - minX || 1;
-                        const totalHeight = maxY - minY || 1;
-
-                        const aspectRatio = totalHeight / totalWidth;
-                        panesContainer.style.minHeight = '0';
-                        panesContainer.style.height = 'auto';
-                        panesContainer.style.paddingBottom = (aspectRatio * 100) + '%';
-                        panesContainer.style.position = 'relative';
-                        // Remove margin-bottom from panesContainer, it will be on tab-display-wrapper
-
-                        console.log(`Window[${windowIndex}] Tab[${tabIndex}] Layout:`, {
-                            minX, minY, maxX, maxY, totalWidth, totalHeight, aspectRatio
-                        });
-
-                        const padding = 2; // px padding inside container
-
-                        tab.panes.forEach(pane => {
-                            const paneEl = document.createElement('div');
-                            paneEl.className = 'pane';
-
-                            // 判断状态：
-                            // 1. 已完成的长时间任务 → 蓝色常亮
-                            // 2. 正在更新中 → 绿色闪烁
-                            if (isLongRunningCompleted(pane.session_id)) {
-                                paneEl.classList.add('long-running');
-                            } else if (currentLayout.updated_sessions.includes(pane.session_id)) {
-                                paneEl.classList.add('updated');
-                            }
-
-                            const left = ((pane.x - minX) / totalWidth) * 100;
-                            const top = ((pane.y - minY) / totalHeight) * 100;
-                            const width = (pane.width / totalWidth) * 100;
-                            const height = (pane.height / totalHeight) * 100;
-
-                            paneEl.style.left = `calc(${left}% + ${padding}px)`;
-                            paneEl.style.top = `calc(${top}% + ${padding}px)`;
-                            paneEl.style.width = `calc(${width}% - ${padding * 2}px)`;
-                            paneEl.style.height = `calc(${height}% - ${padding * 2}px)`;
-                            
-                            paneEl.innerHTML = `<div><strong>#${pane.index}</strong><br>${pane.name || 'Pane'}</div>`;
-                            
-                            const debugInfo = `Raw: ${Math.round(pane.x)},${Math.round(pane.y)} ${Math.round(pane.width)}x${Math.round(pane.height)}\nCalc: ${left.toFixed(1)}%, ${top.toFixed(1)}%`;
-                            paneEl.title = `[${pane.index}] ${pane.session_id}\n${debugInfo}`;
-
-                            console.log(`  Pane[${pane.index}] ${pane.name}:`, {
-                                raw: {x: pane.x, y: pane.y, w: pane.width, h: pane.height},
-                                calc: {left, top, width, height}
-                            });
-
-                            paneEl.onclick = () => {
-                                // 清除长时间运行状态
-                                clearLongRunning(pane.session_id);
-                                ws.send('activate:' + pane.session_id);
-                            };
-                            paneEl.oncontextmenu = (e) => showContextMenu(e, 'session', pane.session_id, pane.name);
-
-                            panesContainer.appendChild(paneEl);
-                        });
-                    } else {
-                        panesContainer.style.height = '150px';
-                        const emptyEl = document.createElement('div');
-                        emptyEl.style.padding = '20px';
-                        emptyEl.style.color = '#8b949e';
-                        emptyEl.style.textAlign = 'center';
-                        emptyEl.textContent = 'No active panes';
-                        panesContainer.appendChild(emptyEl);
-                    }
-                    tabDisplayWrapperEl.appendChild(panesContainer);
-                    windowEl.appendChild(tabDisplayWrapperEl);
-                });
-
-                container.appendChild(windowEl);
+            // 获取现有 window 元素
+            const existingWindows = new Map();
+            container.querySelectorAll('.window').forEach(el => {
+                existingWindows.set(el.dataset.windowId, el);
             });
-            console.groupEnd();
+
+            const newWindowIds = new Set();
+
+            currentLayout.windows.forEach((windowData) => {
+                newWindowIds.add(windowData.window_id);
+                let windowEl = existingWindows.get(windowData.window_id);
+
+                if (windowEl) {
+                    // 更新已有 window
+                    updateWindowTitle(windowEl, windowData);
+                } else {
+                    // 创建新 window
+                    windowEl = createWindowElement(windowData);
+                    container.appendChild(windowEl);
+                }
+
+                // 处理 tabs
+                updateTabs(windowEl, windowData.tabs, updatedSessions, activeSessionId);
+            });
+
+            // 删除不存在的 window
+            existingWindows.forEach((el, id) => {
+                if (!newWindowIds.has(id)) {
+                    el.remove();
+                }
+            });
+        }
+
+        function updateTabs(windowEl, tabs, updatedSessions, activeSessionId) {
+            // 获取现有 tab 元素
+            const existingTabs = new Map();
+            windowEl.querySelectorAll('.tab-display-wrapper').forEach(el => {
+                existingTabs.set(el.dataset.tabId, el);
+            });
+
+            const newTabIds = new Set();
+
+            tabs.forEach((tabData) => {
+                newTabIds.add(tabData.tab_id);
+                let tabEl = existingTabs.get(tabData.tab_id);
+
+                if (tabEl) {
+                    // 更新已有 tab
+                    updateTabTitle(tabEl, tabData);
+                } else {
+                    // 创建新 tab
+                    tabEl = createTabElement(tabData);
+                    windowEl.appendChild(tabEl);
+                }
+
+                // 处理 panes
+                updatePanes(tabEl, tabData.panes, updatedSessions, activeSessionId);
+            });
+
+            // 删除不存在的 tab
+            existingTabs.forEach((el, id) => {
+                if (!newTabIds.has(id)) {
+                    el.remove();
+                }
+            });
+        }
+
+        function updatePanes(tabEl, panes, updatedSessions, activeSessionId) {
+            const panesContainer = tabEl.querySelector('.panes-container');
+            if (!panesContainer) return;
+
+            // 获取现有 pane 元素
+            const existingPanes = new Map();
+            panesContainer.querySelectorAll('.pane').forEach(el => {
+                existingPanes.set(el.dataset.sessionId, el);
+            });
+
+            const newPaneIds = new Set();
+
+            if (panes.length > 0) {
+                const layoutInfo = getLayoutInfo(panes);
+
+                // 更新容器样式
+                panesContainer.style.minHeight = '0';
+                panesContainer.style.height = 'auto';
+                panesContainer.style.paddingBottom = (layoutInfo.aspectRatio * 100) + '%';
+                panesContainer.style.position = 'relative';
+
+                panes.forEach((paneData) => {
+                    newPaneIds.add(paneData.session_id);
+                    let paneEl = existingPanes.get(paneData.session_id);
+
+                    if (paneEl) {
+                        // 只更新状态，不重建元素
+                        updatePaneStatus(paneEl, paneData.session_id, updatedSessions, activeSessionId);
+                    } else {
+                        // 创建新 pane
+                        paneEl = createPaneElement(paneData, layoutInfo);
+                        updatePaneStatus(paneEl, paneData.session_id, updatedSessions, activeSessionId);
+                        panesContainer.appendChild(paneEl);
+                    }
+                });
+
+                // 移除 empty 提示
+                const emptyEl = panesContainer.querySelector('div[style*="padding: 20px"]');
+                if (emptyEl) emptyEl.remove();
+            } else {
+                // 显示空状态
+                if (!panesContainer.querySelector('div[style*="padding: 20px"]')) {
+                    panesContainer.style.height = '150px';
+                    panesContainer.style.paddingBottom = '0';
+                    const emptyEl = document.createElement('div');
+                    emptyEl.style.padding = '20px';
+                    emptyEl.style.color = '#8b949e';
+                    emptyEl.style.textAlign = 'center';
+                    emptyEl.textContent = 'No active panes';
+                    panesContainer.appendChild(emptyEl);
+                }
+            }
+
+            // 删除不存在的 pane
+            existingPanes.forEach((el, id) => {
+                if (!newPaneIds.has(id)) {
+                    el.remove();
+                }
+            });
         }
 
         connect();
