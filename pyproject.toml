@@ -12,9 +12,7 @@ dependencies = [
 ]
 
 [project.scripts]
-termsupervisor-demo = "termsupervisor.demo:main"
-termsupervisor = "termsupervisor.supervisor:main"
-termsupervisor-web = "termsupervisor.server:main"
+termsupervisor = "termsupervisor.web.app:main"
 
 [build-system]
 requires = ["uv_build>=0.9.12,<0.10.0"]

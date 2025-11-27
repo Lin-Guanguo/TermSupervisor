@@ -1,7 +1,7 @@
 .PHONY: run rerun run-web run-cli stop viewlog taillog clean test help
 
 LOG_FILE = server.log
-PROC_NAME = termsupervisor-web
+PROC_NAME = termsupervisor
 
 # 后台运行 Web 服务
 run:

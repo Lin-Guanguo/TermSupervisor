@@ -11,12 +11,42 @@
             min-height: 100vh;
             padding: 20px;
         }
-        h1 { margin-bottom: 20px; color: #58a6ff; }
+        h1 { margin-bottom: 20px; color: #58a6ff; display: inline-block; }
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .config-box {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #8b949e;
+        }
+        .config-box label {
+            white-space: nowrap;
+        }
+        .config-box select {
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            color: #e6edf3;
+            padding: 4px 8px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .config-box select:focus {
+            outline: none;
+            border-color: #58a6ff;
+        }
         .windows-container {
             display: flex;
             flex-wrap: wrap;
             gap: 15px;
             justify-content: flex-start;
+            min-height: 200px;
         }
         .window {
             background: #161b22;
@@ -29,11 +59,15 @@
             flex-wrap: wrap; /* Allow tabs to wrap */
             gap: 15px; /* Space between tab wrappers */
             align-items: flex-start; /* Align items to the top */
+            animation: fadeIn 0.15s ease-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0.7; }
+            to { opacity: 1; }
         }
         .tab-display-wrapper {
-            flex: 0 0 calc(25% - 12px); /* Four columns with gap */
-            max-width: calc(25% - 12px);
-            background: #21262d; /* Background for each tab group */
+            /* 宽度由 JavaScript 动态设置 */
+            background: #21262d;
             border: 1px solid #30363d;
             border-radius: 6px;
             padding: 8px;
@@ -50,6 +84,80 @@
             margin-bottom: 10px;
             color: #f0f6fc;
             flex: 0 0 100%; /* Make title take full width */
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .window-title-text {
+            flex: 1;
+        }
+        .add-tab-wrapper {
+            position: relative;
+            padding: 8px;
+            padding-left: 80px;
+            margin: -8px;
+            margin-left: -70px;
+        }
+        .add-tab-btn {
+            background: #238636;
+            border: none;
+            border-radius: 4px;
+            color: #fff;
+            padding: 4px 10px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .add-tab-btn:hover {
+            background: #2ea043;
+        }
+        .add-tab-dropdown {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            padding-top: 2px;
+            display: none;
+            z-index: 100;
+        }
+        .add-tab-dropdown-inner {
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 8px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+        }
+        .add-tab-wrapper:hover .add-tab-dropdown {
+            display: block;
+        }
+        .layout-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+        }
+        .layout-option {
+            width: 50px;
+            height: 40px;
+            background: #0d1117;
+            border: 1px solid #484f58;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            padding: 4px;
+            gap: 2px;
+        }
+        .layout-option:hover {
+            border-color: #58a6ff;
+            background: #161b22;
+        }
+        .layout-option .row {
+            flex: 1;
+            display: flex;
+            gap: 2px;
+        }
+        .layout-option .cell {
+            flex: 1;
+            background: #30363d;
+            border-radius: 2px;
         }
         .tab-title {
             font-weight: 500;
@@ -101,6 +209,12 @@
             0%, 100% { background: rgba(33, 38, 45, 0.85); border-color: #484f58; }
             50% { background: rgba(35, 134, 54, 0.85); border-color: #3fb950; }
         }
+        /* 长时间运行任务 - 蓝色常亮 */
+        .pane.long-running {
+            background: rgba(56, 139, 253, 0.3) !important;
+            border-color: #58a6ff !important;
+            animation: none !important;
+        }
         .status {
             position: fixed;
             bottom: 20px;
@@ -113,16 +227,238 @@
         }
         .status.connected { border-left: 3px solid #3fb950; }
         .status.disconnected { border-left: 3px solid #f85149; }
+
+        /* 右键菜单 */
+        .context-menu {
+            position: fixed;
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 4px 0;
+            min-width: 150px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+            z-index: 1000;
+            display: none;
+        }
+        .context-menu.show { display: block; }
+        .context-menu-item {
+            padding: 8px 16px;
+            cursor: pointer;
+            font-size: 13px;
+            color: #e6edf3;
+        }
+        .context-menu-item:hover {
+            background: #30363d;
+        }
+
+        /* 编辑弹窗 */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.6);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 20px;
+            min-width: 300px;
+        }
+        .modal h3 {
+            margin-bottom: 15px;
+            color: #f0f6fc;
+        }
+        .modal input {
+            width: 100%;
+            padding: 8px 12px;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            color: #e6edf3;
+            font-size: 14px;
+            margin-bottom: 15px;
+        }
+        .modal input:focus {
+            outline: none;
+            border-color: #58a6ff;
+        }
+        .modal-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+        .modal-btn {
+            padding: 6px 16px;
+            border-radius: 4px;
+            border: 1px solid #30363d;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .modal-btn.cancel {
+            background: #21262d;
+            color: #e6edf3;
+        }
+        .modal-btn.save {
+            background: #238636;
+            border-color: #238636;
+            color: #fff;
+        }
+        .modal-btn:hover { opacity: 0.9; }
     </style>
 </head>
 <body>
-    <h1>TermSupervisor</h1>
+    <div class="header">
+        <h1>TermSupervisor</h1>
+        <div class="config-box">
+            <label for="tabsPerRow">Tabs per row:</label>
+            <select id="tabsPerRow">
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4" selected>4</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+            </select>
+        </div>
+    </div>
     <div class="windows-container" id="windows"></div>
     <div class="status disconnected" id="status">Disconnected</div>
+
+    <!-- 右键菜单 -->
+    <div class="context-menu" id="contextMenu">
+        <div class="context-menu-item" id="menuRename">Rename</div>
+    </div>
+
+    <!-- 编辑弹窗 -->
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal">
+            <h3 id="modalTitle">Edit Name</h3>
+            <input type="text" id="modalInput" placeholder="Enter name...">
+            <div class="modal-buttons">
+                <button class="modal-btn cancel" id="modalCancel">Cancel</button>
+                <button class="modal-btn save" id="modalSave">Save</button>
+            </div>
+        </div>
+    </div>
 
     <script>
         let ws;
         let currentLayout = { windows: [], updated_sessions: [] };
+        let tabsPerRow = 4; // 默认每行4个tab
+
+        // 配置变化监听
+        document.getElementById('tabsPerRow').addEventListener('change', (e) => {
+            tabsPerRow = parseInt(e.target.value);
+            // 保存到 localStorage
+            localStorage.setItem('tabsPerRow', tabsPerRow);
+            render();
+        });
+
+        // 从 localStorage 恢复配置
+        const savedTabsPerRow = localStorage.getItem('tabsPerRow');
+        if (savedTabsPerRow) {
+            tabsPerRow = parseInt(savedTabsPerRow);
+            document.getElementById('tabsPerRow').value = tabsPerRow;
+        }
+
+        // 追踪 session 更新状态
+        // { session_id: { firstUpdate: timestamp, lastUpdate: timestamp, isLongRunning: bool } }
+        let sessionUpdateTracker = {};
+        const LONG_RUNNING_THRESHOLD = 15000; // 15 秒
+        const UPDATE_TIMEOUT = 6000; // 6 秒无更新认为停止（2个轮询周期）
+
+        // 需要显示蓝色的 session（长时间任务已完成）
+        let longRunningCompleted = new Set();
+
+        // 右键菜单状态
+        let contextTarget = null; // { type: 'window'|'tab'|'session', id: string, name: string }
+
+        // 右键菜单逻辑
+        const contextMenu = document.getElementById('contextMenu');
+        const menuRename = document.getElementById('menuRename');
+        const modalOverlay = document.getElementById('modalOverlay');
+        const modalTitle = document.getElementById('modalTitle');
+        const modalInput = document.getElementById('modalInput');
+        const modalCancel = document.getElementById('modalCancel');
+        const modalSave = document.getElementById('modalSave');
+
+        function showContextMenu(e, type, id, name) {
+            e.preventDefault();
+            e.stopPropagation();
+            contextTarget = { type, id, name };
+            contextMenu.style.left = e.clientX + 'px';
+            contextMenu.style.top = e.clientY + 'px';
+            contextMenu.classList.add('show');
+        }
+
+        function hideContextMenu() {
+            contextMenu.classList.remove('show');
+            // 不在这里清空 contextTarget，让 modal 可以使用
+        }
+
+        document.addEventListener('click', hideContextMenu);
+        document.addEventListener('contextmenu', (e) => {
+            // 检查是否点击在可编辑的元素上
+            if (e.target.closest('.window-title, .tab-title, .pane')) {
+                e.preventDefault();
+            } else {
+                hideContextMenu();
+            }
+        });
+
+        menuRename.addEventListener('click', () => {
+            if (!contextTarget) return;
+            const typeLabels = { window: 'Window', tab: 'Tab', session: 'Session' };
+            modalTitle.textContent = `Rename ${typeLabels[contextTarget.type]}`;
+            modalInput.value = contextTarget.name || '';
+            modalOverlay.classList.add('show');
+            modalInput.focus();
+            modalInput.select();
+            hideContextMenu();
+        });
+
+        modalCancel.addEventListener('click', () => {
+            modalOverlay.classList.remove('show');
+        });
+
+        modalOverlay.addEventListener('click', (e) => {
+            if (e.target === modalOverlay) {
+                modalOverlay.classList.remove('show');
+            }
+        });
+
+        // 输入法组合状态跟踪
+        let isComposing = false;
+        modalInput.addEventListener('compositionstart', () => { isComposing = true; });
+        modalInput.addEventListener('compositionend', () => { isComposing = false; });
+
+        modalInput.addEventListener('keydown', (e) => {
+            // 输入法组合中不触发 Save（keyCode 229 是输入法组合键）
+            if (e.key === 'Enter' && !isComposing && e.keyCode !== 229) {
+                modalSave.click();
+            } else if (e.key === 'Escape') {
+                modalOverlay.classList.remove('show');
+            }
+        });
+
+        modalSave.addEventListener('click', () => {
+            if (!contextTarget) return;
+            const newName = modalInput.value.trim();
+            if (newName) {
+                ws.send(JSON.stringify({
+                    action: 'rename',
+                    type: contextTarget.type,
+                    id: contextTarget.id,
+                    name: newName
+                }));
+            }
+            modalOverlay.classList.remove('show');
+            contextTarget = null;
+        });
 
         function connect() {
             ws = new WebSocket(`ws://${location.host}/ws`);
@@ -140,15 +476,98 @@
 
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
+                // 区分消息类型
+                if (data.type === 'activate_result') {
+                    console.log('Activate result:', data.session_id, data.success);
+                    return;
+                }
+                if (data.type === 'rename_result') {
+                    console.log('Rename result:', data.target_type, data.id, data.success);
+                    return;
+                }
+                if (data.type === 'create_tab_result') {
+                    console.log('Create tab result:', data.window_id, data.success);
+                    return;
+                }
+                // 布局更新
                 currentLayout = data;
+                updateSessionTracker(data.updated_sessions || [], data.active_session_id);
                 render();
             };
         }
 
-        // 记录每个 window 当前选中的 tab (不再使用，但保留注释以示移除)
-        // let selectedTabs = {}; 
+        // 更新 session 追踪器
+        function updateSessionTracker(updatedSessions, activeSessionId) {
+            const now = Date.now();
+
+            // 如果 active session 在蓝色列表中，清除它
+            if (activeSessionId && longRunningCompleted.has(activeSessionId)) {
+                longRunningCompleted.delete(activeSessionId);
+                delete sessionUpdateTracker[activeSessionId];
+            }
+
+            // 更新有更新的 session
+            updatedSessions.forEach(sessionId => {
+                // 如果之前是蓝色状态，现在又有更新了，清除蓝色状态
+                if (longRunningCompleted.has(sessionId)) {
+                    longRunningCompleted.delete(sessionId);
+                }
+
+                if (!sessionUpdateTracker[sessionId]) {
+                    sessionUpdateTracker[sessionId] = {
+                        firstUpdate: now,
+                        lastUpdate: now
+                    };
+                } else {
+                    sessionUpdateTracker[sessionId].lastUpdate = now;
+                }
+            });
+
+            // 检查停止更新的 session
+            Object.keys(sessionUpdateTracker).forEach(sessionId => {
+                const tracker = sessionUpdateTracker[sessionId];
+                const timeSinceLastUpdate = now - tracker.lastUpdate;
+                const totalDuration = tracker.lastUpdate - tracker.firstUpdate;
+
+                // 如果超过 UPDATE_TIMEOUT 没有更新，认为任务停止
+                if (timeSinceLastUpdate > UPDATE_TIMEOUT) {
+                    // 如果持续时间超过阈值，加入蓝色列表
+                    if (totalDuration >= LONG_RUNNING_THRESHOLD) {
+                        longRunningCompleted.add(sessionId);
+                    }
+                    // 清除追踪器
+                    delete sessionUpdateTracker[sessionId];
+                }
+            });
+        }
+
+        // 判断 session 是否正在持续更新（显示绿色闪烁）
+        function isUpdating(sessionId) {
+            return sessionUpdateTracker.hasOwnProperty(sessionId);
+        }
+
+        // 判断 session 是否是已完成的长时间任务（显示蓝色）
+        function isLongRunningCompleted(sessionId) {
+            return longRunningCompleted.has(sessionId);
+        }
+
+        // 清除 session 的长时间运行状态（当用户点击激活时）
+        function clearLongRunning(sessionId) {
+            longRunningCompleted.delete(sessionId);
+            delete sessionUpdateTracker[sessionId];
+        }
+
+        // 是否正在 hover 下拉菜单
+        let isHoveringDropdown = false;
+        let pendingLayout = null;
 
         function render() {
+            // 如果正在 hover 下拉菜单，延迟渲染
+            if (isHoveringDropdown) {
+                pendingLayout = currentLayout;
+                return;
+            }
+
             const container = document.getElementById('windows');
             container.innerHTML = '';
 
@@ -160,17 +579,93 @@
 
                 const titleEl = document.createElement('div');
                 titleEl.className = 'window-title';
-                titleEl.textContent = window.name || 'Window';
+
+                const titleText = document.createElement('span');
+                titleText.className = 'window-title-text';
+                titleText.textContent = window.name || 'Window';
+                titleText.oncontextmenu = (e) => showContextMenu(e, 'window', window.window_id, window.name);
+                titleEl.appendChild(titleText);
+
+                const addTabWrapper = document.createElement('div');
+                addTabWrapper.className = 'add-tab-wrapper';
+
+                const addTabBtn = document.createElement('button');
+                addTabBtn.className = 'add-tab-btn';
+                addTabBtn.textContent = '+ Tab';
+                addTabWrapper.appendChild(addTabBtn);
+
+                const dropdown = document.createElement('div');
+                dropdown.className = 'add-tab-dropdown';
+
+                const layoutGrid = document.createElement('div');
+                layoutGrid.className = 'layout-grid';
+
+                // 布局选项
+                const layouts = [
+                    { name: 'single', html: '<div class="row"><div class="cell"></div></div>' },
+                    { name: '2rows', html: '<div class="row"><div class="cell"></div></div><div class="row"><div class="cell"></div></div>' },
+                    { name: '2cols', html: '<div class="row"><div class="cell"></div><div class="cell"></div></div>' },
+                    { name: '2x2', html: '<div class="row"><div class="cell"></div><div class="cell"></div></div><div class="row"><div class="cell"></div><div class="cell"></div></div>' },
+                    { name: '2cols-right2rows', html: '<div class="row" style="flex:1"><div class="cell"></div><div style="flex:1;display:flex;flex-direction:column;gap:2px"><div class="cell" style="flex:1"></div><div class="cell" style="flex:1"></div></div></div>' },
+                    { name: '2rows-bottom2cols', html: '<div class="row"><div class="cell"></div></div><div class="row"><div class="cell"></div><div class="cell"></div></div>' }
+                ];
+
+                layouts.forEach(layout => {
+                    const option = document.createElement('div');
+                    option.className = 'layout-option';
+                    option.title = layout.name;
+                    option.innerHTML = layout.html;
+
+                    option.onclick = (e) => {
+                        e.stopPropagation();
+                        ws.send(JSON.stringify({
+                            action: 'create_tab',
+                            window_id: window.window_id,
+                            layout: layout.name
+                        }));
+                    };
+
+                    layoutGrid.appendChild(option);
+                });
+
+                const dropdownInner = document.createElement('div');
+                dropdownInner.className = 'add-tab-dropdown-inner';
+                dropdownInner.appendChild(layoutGrid);
+                dropdown.appendChild(dropdownInner);
+
+                // hover 时暂停渲染，离开时恢复
+                addTabWrapper.onmouseenter = () => {
+                    isHoveringDropdown = true;
+                };
+                addTabWrapper.onmouseleave = () => {
+                    isHoveringDropdown = false;
+                    if (pendingLayout) {
+                        currentLayout = pendingLayout;
+                        pendingLayout = null;
+                        render();
+                    }
+                };
+
+                addTabWrapper.appendChild(dropdown);
+                titleEl.appendChild(addTabWrapper);
+
                 windowEl.appendChild(titleEl);
 
                 // 直接遍历所有 tab，并显示其 pane 布局
                 window.tabs.forEach((tab, tabIndex) => {
                     const tabDisplayWrapperEl = document.createElement('div');
                     tabDisplayWrapperEl.className = 'tab-display-wrapper';
+                    // 动态计算宽度
+                    const gapPx = 15; // gap in pixels
+                    const widthPercent = 100 / tabsPerRow;
+                    const gapOffset = gapPx * (tabsPerRow - 1) / tabsPerRow;
+                    tabDisplayWrapperEl.style.flex = `0 0 calc(${widthPercent}% - ${gapOffset}px)`;
+                    tabDisplayWrapperEl.style.maxWidth = `calc(${widthPercent}% - ${gapOffset}px)`;
 
                     const tabTitleEl = document.createElement('div');
                     tabTitleEl.className = 'tab-title';
-                    tabTitleEl.textContent = `Tab: ${tab.name || 'Tab'} (ID: ${tab.tab_id})`;
+                    tabTitleEl.textContent = tab.name || 'Tab';
+                    tabTitleEl.oncontextmenu = (e) => showContextMenu(e, 'tab', tab.tab_id, tab.name);
                     tabDisplayWrapperEl.appendChild(tabTitleEl);
 
                     const panesContainer = document.createElement('div');
@@ -200,7 +695,13 @@
                         tab.panes.forEach(pane => {
                             const paneEl = document.createElement('div');
                             paneEl.className = 'pane';
-                            if (currentLayout.updated_sessions.includes(pane.session_id)) {
+
+                            // 判断状态：
+                            // 1. 已完成的长时间任务 → 蓝色常亮
+                            // 2. 正在更新中 → 绿色闪烁
+                            if (isLongRunningCompleted(pane.session_id)) {
+                                paneEl.classList.add('long-running');
+                            } else if (currentLayout.updated_sessions.includes(pane.session_id)) {
                                 paneEl.classList.add('updated');
                             }
 
@@ -225,8 +726,11 @@
                             });
 
                             paneEl.onclick = () => {
+                                // 清除长时间运行状态
+                                clearLongRunning(pane.session_id);
                                 ws.send('activate:' + pane.session_id);
                             };
+                            paneEl.oncontextmenu = (e) => showContextMenu(e, 'session', pane.session_id, pane.name);
 
                             panesContainer.appendChild(paneEl);
                         });
