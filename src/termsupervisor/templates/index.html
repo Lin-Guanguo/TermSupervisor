@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>TermSupervisor</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #0d1117;
+            color: #e6edf3;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        h1 { margin-bottom: 20px; color: #58a6ff; }
+        .windows-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            justify-content: flex-start;
+        }
+        .window {
+            background: #161b22;
+            border: 2px solid #30363d;
+            border-radius: 8px;
+            padding: 12px;
+            flex: 1 1 280px;
+            max-width: 100%; /* Allow window to take full width if needed */
+            display: flex; /* Enable flex for horizontal tab layout */
+            flex-wrap: wrap; /* Allow tabs to wrap */
+            gap: 15px; /* Space between tab wrappers */
+            align-items: flex-start; /* Align items to the top */
+        }
+        .tab-display-wrapper {
+            flex: 0 0 calc(25% - 12px); /* Four columns with gap */
+            max-width: calc(25% - 12px);
+            background: #21262d; /* Background for each tab group */
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 8px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .window-title {
+            font-weight: 600;
+            padding: 8px 12px;
+            background: #21262d;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            color: #f0f6fc;
+            flex: 0 0 100%; /* Make title take full width */
+        }
+        .tab-title {
+            font-weight: 500;
+            padding: 6px 10px;
+            background: #161b22; /* Darker background for tab title inside wrapper */
+            border-radius: 4px;
+            margin-top: 0; /* Adjusted margin */
+            margin-bottom: 0; /* Adjusted margin */
+            color: #8b949e;
+            font-size: 13px;
+            text-align: center;
+        }
+        .panes-container {
+            position: relative;
+            background: #010409;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            min-height: 100px; /* Adjust min-height as needed */
+            /* margin-bottom removed, handled by gap on .window */
+            overflow: hidden; /* Ensure panes don't overflow */
+            flex-grow: 1; /* Allow it to take available space in the column */
+        }
+        .pane {
+            position: absolute;
+            background: rgba(33, 38, 45, 0.85); /* Semi-transparent for overlap detection */
+            border: 2px solid #484f58;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            text-align: center;
+            padding: 4px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            color: #c9d1d9;
+            z-index: 1;
+        }
+        .pane:hover { 
+            border-color: #58a6ff; 
+            background: rgba(48, 54, 61, 0.95);
+            z-index: 10; 
+        }
+        .pane.updated {
+            animation: flash 0.8s ease-in-out 3;
+        }
+        @keyframes flash {
+            0%, 100% { background: rgba(33, 38, 45, 0.85); border-color: #484f58; }
+            50% { background: rgba(35, 134, 54, 0.85); border-color: #3fb950; }
+        }
+        .status {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            font-size: 12px;
+        }
+        .status.connected { border-left: 3px solid #3fb950; }
+        .status.disconnected { border-left: 3px solid #f85149; }
+    </style>
+</head>
+<body>
+    <h1>TermSupervisor</h1>
+    <div class="windows-container" id="windows"></div>
+    <div class="status disconnected" id="status">Disconnected</div>
+
+    <script>
+        let ws;
+        let currentLayout = { windows: [], updated_sessions: [] };
+
+        function connect() {
+            ws = new WebSocket(`ws://${location.host}/ws`);
+
+            ws.onopen = () => {
+                document.getElementById('status').textContent = 'Connected';
+                document.getElementById('status').className = 'status connected';
+            };
+
+            ws.onclose = () => {
+                document.getElementById('status').textContent = 'Disconnected - Reconnecting...';
+                document.getElementById('status').className = 'status disconnected';
+                setTimeout(connect, 2000);
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                currentLayout = data;
+                render();
+            };
+        }
+
+        // 记录每个 window 当前选中的 tab (不再使用，但保留注释以示移除)
+        // let selectedTabs = {}; 
+
+        function render() {
+            const container = document.getElementById('windows');
+            container.innerHTML = '';
+
+            console.group('Render Layout');
+
+            currentLayout.windows.forEach((window, windowIndex) => {
+                const windowEl = document.createElement('div');
+                windowEl.className = 'window';
+
+                const titleEl = document.createElement('div');
+                titleEl.className = 'window-title';
+                titleEl.textContent = window.name || 'Window';
+                windowEl.appendChild(titleEl);
+
+                // 直接遍历所有 tab，并显示其 pane 布局
+                window.tabs.forEach((tab, tabIndex) => {
+                    const tabDisplayWrapperEl = document.createElement('div');
+                    tabDisplayWrapperEl.className = 'tab-display-wrapper';
+
+                    const tabTitleEl = document.createElement('div');
+                    tabTitleEl.className = 'tab-title';
+                    tabTitleEl.textContent = `Tab: ${tab.name || 'Tab'} (ID: ${tab.tab_id})`;
+                    tabDisplayWrapperEl.appendChild(tabTitleEl);
+
+                    const panesContainer = document.createElement('div');
+                    panesContainer.className = 'panes-container';
+
+                    if (tab.panes.length > 0) {
+                        const minX = Math.min(...tab.panes.map(p => p.x));
+                        const minY = Math.min(...tab.panes.map(p => p.y));
+                        const maxX = Math.max(...tab.panes.map(p => p.x + p.width));
+                        const maxY = Math.max(...tab.panes.map(p => p.y + p.height));
+                        const totalWidth = maxX - minX || 1;
+                        const totalHeight = maxY - minY || 1;
+
+                        const aspectRatio = totalHeight / totalWidth;
+                        panesContainer.style.minHeight = '0';
+                        panesContainer.style.height = 'auto';
+                        panesContainer.style.paddingBottom = (aspectRatio * 100) + '%';
+                        panesContainer.style.position = 'relative';
+                        // Remove margin-bottom from panesContainer, it will be on tab-display-wrapper
+
+                        console.log(`Window[${windowIndex}] Tab[${tabIndex}] Layout:`, {
+                            minX, minY, maxX, maxY, totalWidth, totalHeight, aspectRatio
+                        });
+
+                        const padding = 2; // px padding inside container
+
+                        tab.panes.forEach(pane => {
+                            const paneEl = document.createElement('div');
+                            paneEl.className = 'pane';
+                            if (currentLayout.updated_sessions.includes(pane.session_id)) {
+                                paneEl.classList.add('updated');
+                            }
+
+                            const left = ((pane.x - minX) / totalWidth) * 100;
+                            const top = ((pane.y - minY) / totalHeight) * 100;
+                            const width = (pane.width / totalWidth) * 100;
+                            const height = (pane.height / totalHeight) * 100;
+
+                            paneEl.style.left = `calc(${left}% + ${padding}px)`;
+                            paneEl.style.top = `calc(${top}% + ${padding}px)`;
+                            paneEl.style.width = `calc(${width}% - ${padding * 2}px)`;
+                            paneEl.style.height = `calc(${height}% - ${padding * 2}px)`;
+                            
+                            paneEl.innerHTML = `<div><strong>#${pane.index}</strong><br>${pane.name || 'Pane'}</div>`;
+                            
+                            const debugInfo = `Raw: ${Math.round(pane.x)},${Math.round(pane.y)} ${Math.round(pane.width)}x${Math.round(pane.height)}\nCalc: ${left.toFixed(1)}%, ${top.toFixed(1)}%`;
+                            paneEl.title = `[${pane.index}] ${pane.session_id}\n${debugInfo}`;
+
+                            console.log(`  Pane[${pane.index}] ${pane.name}:`, {
+                                raw: {x: pane.x, y: pane.y, w: pane.width, h: pane.height},
+                                calc: {left, top, width, height}
+                            });
+
+                            paneEl.onclick = () => {
+                                ws.send('activate:' + pane.session_id);
+                            };
+
+                            panesContainer.appendChild(paneEl);
+                        });
+                    } else {
+                        panesContainer.style.height = '150px';
+                        const emptyEl = document.createElement('div');
+                        emptyEl.style.padding = '20px';
+                        emptyEl.style.color = '#8b949e';
+                        emptyEl.style.textAlign = 'center';
+                        emptyEl.textContent = 'No active panes';
+                        panesContainer.appendChild(emptyEl);
+                    }
+                    tabDisplayWrapperEl.appendChild(panesContainer);
+                    windowEl.appendChild(tabDisplayWrapperEl);
+                });
+
+                container.appendChild(windowEl);
+            });
+            console.groupEnd();
+        }
+
+        connect();
+    </script>
+</body>
+</html>
