@@ -221,6 +221,61 @@
             border-color: #d29922 !important;
             box-shadow: 0 0 8px rgba(210, 153, 34, 0.5);
         }
+
+        /* === 状态指示器样式 === */
+        .pane-status {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            font-size: 9px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            background: rgba(0,0,0,0.5);
+            color: #fff;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .pane-status.status-idle { background: #6e7681; }
+        .pane-status.status-running { background: #1f6feb; }
+        .pane-status.status-thinking { background: #8957e5; }
+        .pane-status.status-waiting_approval { background: #d29922; }
+        .pane-status.status-completed { background: #238636; }
+        .pane-status.status-failed { background: #da3633; }
+        .pane-status.status-interrupted { background: #db6d28; }
+
+        /* 需要关注的状态 - 脉冲动画 */
+        .pane-status.needs-attention {
+            animation: statusPulse 1.5s ease-in-out infinite;
+        }
+        @keyframes statusPulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(1.05); }
+        }
+
+        /* 状态对应的 pane 边框颜色 */
+        .pane.status-waiting_approval {
+            border-color: #d29922 !important;
+            background: rgba(210, 153, 34, 0.15) !important;
+        }
+        .pane.status-completed {
+            border-color: #238636 !important;
+            background: rgba(35, 134, 54, 0.15) !important;
+        }
+        .pane.status-failed {
+            border-color: #da3633 !important;
+            background: rgba(218, 54, 51, 0.15) !important;
+        }
+        .pane.status-thinking {
+            border-color: #8957e5 !important;
+            background: rgba(137, 87, 229, 0.15) !important;
+        }
+
+        /* 思考时长显示 */
+        .thinking-duration {
+            font-size: 8px;
+            color: #b392f0;
+            margin-left: 4px;
+        }
         .status {
             position: fixed;
             bottom: 20px;
@@ -315,6 +370,67 @@
             color: #fff;
         }
         .modal-btn:hover { opacity: 0.9; }
+
+        /* Toast 通知 */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 3000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-width: 320px;
+            pointer-events: none;
+        }
+        .toast {
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 12px 16px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+            animation: toastIn 0.3s ease-out;
+            pointer-events: auto;
+            cursor: pointer;
+        }
+        .toast.fade-out {
+            animation: toastOut 0.5s ease-out forwards;
+        }
+        @keyframes toastIn {
+            from { opacity: 0; transform: translateX(100%); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes toastOut {
+            from { opacity: 1; transform: translateX(0); }
+            to { opacity: 0; transform: translateX(100%); }
+        }
+        .toast-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+        .toast-status {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 3px;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+        .toast-status.status-waiting_approval { background: #d29922; color: #000; }
+        .toast-status.status-completed { background: #238636; color: #fff; }
+        .toast-status.status-failed { background: #da3633; color: #fff; }
+        .toast-status.status-interrupted { background: #db6d28; color: #fff; }
+        .toast-title {
+            font-size: 13px;
+            color: #e6edf3;
+            font-weight: 500;
+        }
+        .toast-body {
+            font-size: 12px;
+            color: #8b949e;
+            line-height: 1.4;
+        }
 
         /* 移动端响应式 */
         @media (max-width: 768px) {
@@ -421,6 +537,9 @@
         <div class="context-menu-item" id="menuRename">Rename</div>
     </div>
 
+    <!-- Toast 通知容器 -->
+    <div class="toast-container" id="toastContainer"></div>
+
     <!-- 编辑弹窗 -->
     <div class="modal-overlay" id="modalOverlay">
         <div class="modal">
@@ -435,8 +554,47 @@
 
     <script>
         let ws;
-        let currentLayout = { windows: [], updated_sessions: [] };
+        let currentLayout = { windows: [], updated_sessions: [], pane_statuses: {} };
         let tabsPerRow = 4; // 默认每行4个tab
+
+        // Toast 通知系统
+        const toastContainer = document.getElementById('toastContainer');
+        const TOAST_DURATION = 5000; // 显示 5 秒
+        const TOAST_FADE_DURATION = 500; // 渐隐 0.5 秒
+
+        function showToast(status, title, body) {
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+
+            const statusLabels = {
+                'waiting_approval': 'APPROVAL',
+                'completed': 'DONE',
+                'failed': 'FAILED',
+                'interrupted': 'STOPPED'
+            };
+
+            toast.innerHTML = `
+                <div class="toast-header">
+                    <span class="toast-status status-${status}">${statusLabels[status] || status}</span>
+                    <span class="toast-title">${title}</span>
+                </div>
+                <div class="toast-body">${body}</div>
+            `;
+
+            // 点击关闭
+            toast.onclick = () => removeToast(toast);
+
+            toastContainer.appendChild(toast);
+
+            // 自动消失
+            setTimeout(() => removeToast(toast), TOAST_DURATION);
+        }
+
+        function removeToast(toast) {
+            if (toast.classList.contains('fade-out')) return;
+            toast.classList.add('fade-out');
+            setTimeout(() => toast.remove(), TOAST_FADE_DURATION);
+        }
 
         // 配置变化监听
         document.getElementById('tabsPerRow').addEventListener('change', (e) => {
@@ -461,6 +619,9 @@
 
         // 需要显示蓝色的 session（长时间任务已完成）
         let longRunningCompleted = new Set();
+
+        // 已确认的状态（用户已看到，不再高亮）
+        let acknowledgedSessions = new Set();
 
         // 右键菜单状态
         let contextTarget = null; // { type: 'window'|'tab'|'session', id: string, name: string }
@@ -588,10 +749,9 @@
         function updateSessionTracker(updatedSessions, activeSessionId) {
             const now = Date.now();
 
-            // 如果 active session 在蓝色列表中，清除它
-            if (activeSessionId && longRunningCompleted.has(activeSessionId)) {
-                longRunningCompleted.delete(activeSessionId);
-                delete sessionUpdateTracker[activeSessionId];
+            // 如果 active session 变化，确认它（后台 focus 也算看到了）
+            if (activeSessionId) {
+                acknowledgeSession(activeSessionId);
             }
 
             // 更新有更新的 session
@@ -643,6 +803,13 @@
         function clearLongRunning(sessionId) {
             longRunningCompleted.delete(sessionId);
             delete sessionUpdateTracker[sessionId];
+        }
+
+        // 确认 session 状态（用户已看到）
+        function acknowledgeSession(sessionId) {
+            acknowledgedSessions.add(sessionId);
+            // 同时清除长时间运行状态
+            clearLongRunning(sessionId);
         }
 
         // 是否正在 hover 下拉菜单
@@ -778,18 +945,46 @@
             paneEl.style.width = `calc(${width}% - ${padding * 2}px)`;
             paneEl.style.height = `calc(${height}% - ${padding * 2}px)`;
 
-            paneEl.innerHTML = `<div><strong>#${paneData.index}</strong><br>${paneData.name || 'Pane'}</div>`;
+            // 状态指示器
+            const statusEl = document.createElement('span');
+            statusEl.className = 'pane-status';
+            statusEl.dataset.statusIndicator = 'true';
+            paneEl.appendChild(statusEl);
+
+            // 内容区
+            const contentEl = document.createElement('div');
+            contentEl.innerHTML = `<strong>#${paneData.index}</strong><br>${paneData.name || 'Pane'}`;
+            paneEl.appendChild(contentEl);
 
             const debugInfo = `Raw: ${Math.round(paneData.x)},${Math.round(paneData.y)} ${Math.round(paneData.width)}x${Math.round(paneData.height)}\nCalc: ${left.toFixed(1)}%, ${top.toFixed(1)}%`;
             paneEl.title = `[${paneData.index}] ${paneData.session_id}\n${debugInfo}`;
 
             paneEl.onclick = () => {
-                clearLongRunning(paneData.session_id);
+                acknowledgeSession(paneData.session_id);
                 ws.send('activate:' + paneData.session_id);
+                render(); // 立即更新 UI
             };
             paneEl.oncontextmenu = (e) => showContextMenu(e, 'session', paneData.session_id, paneData.name);
 
             return paneEl;
+        }
+
+        // 获取状态显示文本
+        function getStatusText(status, thinkingDuration) {
+            if (status === 'thinking' && thinkingDuration > 0) {
+                return `thinking (${Math.round(thinkingDuration)}s)`;
+            }
+            const statusLabels = {
+                'idle': 'idle',
+                'running': 'running',
+                'thinking': 'thinking',
+                'waiting_approval': 'approval',
+                'completed': 'done',
+                'failed': 'failed',
+                'interrupted': 'stopped',
+                'unknown': ''
+            };
+            return statusLabels[status] || status;
         }
 
         // ==================== 更新元素函数 ====================
@@ -808,10 +1003,58 @@
             }
         }
 
-        function updatePaneStatus(paneEl, sessionId, updatedSessions, activeSessionId) {
+        // 上一次的状态，用于检测状态变化发送通知
+        let previousStatuses = {};
+
+        function updatePaneStatus(paneEl, sessionId, updatedSessions, activeSessionId, paneStatuses) {
             const shouldBeUpdated = updatedSessions.includes(sessionId);
             const shouldBeLongRunning = isLongRunningCompleted(sessionId);
             const shouldBeActive = sessionId === activeSessionId;
+
+            // 获取状态信息
+            const statusInfo = paneStatuses[sessionId] || {};
+            const status = statusInfo.status || 'unknown';
+            const needsNotification = statusInfo.needs_notification || false;
+            const thinkingDuration = statusInfo.thinking_duration || 0;
+            const statusReason = statusInfo.status_reason || '';
+
+            // 检查是否已确认
+            const isAcknowledgedNow = acknowledgedSessions.has(sessionId);
+
+            // 更新状态指示器
+            const statusEl = paneEl.querySelector('[data-status-indicator]');
+            if (statusEl) {
+                const statusText = getStatusText(status, thinkingDuration);
+                if (statusText) {
+                    statusEl.textContent = statusText;
+                    statusEl.className = `pane-status status-${status}`;
+                    // 只有未确认的才显示脉冲动画
+                    if (needsNotification && !isAcknowledgedNow) {
+                        statusEl.classList.add('needs-attention');
+                    }
+                    statusEl.style.display = 'block';
+                    statusEl.title = statusReason;
+                } else {
+                    statusEl.style.display = 'none';
+                }
+            }
+
+            // 检测状态变化
+            const prevStatus = previousStatuses[sessionId];
+
+            // 状态变化时，如果是新的需要通知的状态，清除已确认标记并发送通知
+            if (prevStatus !== status && needsNotification) {
+                acknowledgedSessions.delete(sessionId);
+                const paneName = paneEl.querySelector('strong')?.parentElement?.textContent?.replace(/^#\d+\s*/, '') || sessionId;
+                showToast(status, paneName, statusReason);
+            }
+            previousStatuses[sessionId] = status;
+
+            // 更新 pane 的状态样式（已确认的不高亮）
+            paneEl.classList.remove('status-waiting_approval', 'status-completed', 'status-failed', 'status-thinking');
+            if (['waiting_approval', 'completed', 'failed', 'thinking'].includes(status) && !isAcknowledgedNow) {
+                paneEl.classList.add(`status-${status}`);
+            }
 
             // 更新 active 状态
             if (shouldBeActive) {
@@ -820,18 +1063,21 @@
                 paneEl.classList.remove('active');
             }
 
-            // 更新 long-running 状态
-            if (shouldBeLongRunning) {
-                paneEl.classList.add('long-running');
-                paneEl.classList.remove('updated');
-            } else {
-                paneEl.classList.remove('long-running');
-                // 更新 updated 状态
-                if (shouldBeUpdated && !paneEl.classList.contains('updated')) {
-                    paneEl.classList.add('updated');
-                } else if (!shouldBeUpdated) {
+            // 更新 long-running 状态（仅在没有 LLM 状态时使用）
+            if (status === 'unknown' || status === 'running') {
+                if (shouldBeLongRunning) {
+                    paneEl.classList.add('long-running');
                     paneEl.classList.remove('updated');
+                } else {
+                    paneEl.classList.remove('long-running');
+                    if (shouldBeUpdated && !paneEl.classList.contains('updated')) {
+                        paneEl.classList.add('updated');
+                    } else if (!shouldBeUpdated) {
+                        paneEl.classList.remove('updated');
+                    }
                 }
+            } else {
+                paneEl.classList.remove('long-running', 'updated');
             }
         }
 
@@ -861,6 +1107,7 @@
             const container = document.getElementById('windows');
             const updatedSessions = currentLayout.updated_sessions || [];
             const activeSessionId = currentLayout.active_session_id || null;
+            const paneStatuses = currentLayout.pane_statuses || {};
 
             // 获取现有 window 元素
             const existingWindows = new Map();
@@ -884,7 +1131,7 @@
                 }
 
                 // 处理 tabs
-                updateTabs(windowEl, windowData.tabs, updatedSessions, activeSessionId);
+                updateTabs(windowEl, windowData.tabs, updatedSessions, activeSessionId, paneStatuses);
             });
 
             // 删除不存在的 window
@@ -895,7 +1142,7 @@
             });
         }
 
-        function updateTabs(windowEl, tabs, updatedSessions, activeSessionId) {
+        function updateTabs(windowEl, tabs, updatedSessions, activeSessionId, paneStatuses) {
             // 获取现有 tab 元素
             const existingTabs = new Map();
             windowEl.querySelectorAll('.tab-display-wrapper').forEach(el => {
@@ -918,7 +1165,7 @@
                 }
 
                 // 处理 panes
-                updatePanes(tabEl, tabData.panes, updatedSessions, activeSessionId);
+                updatePanes(tabEl, tabData.panes, updatedSessions, activeSessionId, paneStatuses);
             });
 
             // 删除不存在的 tab
@@ -929,7 +1176,7 @@
             });
         }
 
-        function updatePanes(tabEl, panes, updatedSessions, activeSessionId) {
+        function updatePanes(tabEl, panes, updatedSessions, activeSessionId, paneStatuses) {
             const panesContainer = tabEl.querySelector('.panes-container');
             if (!panesContainer) return;
 
@@ -956,11 +1203,11 @@
 
                     if (paneEl) {
                         // 只更新状态，不重建元素
-                        updatePaneStatus(paneEl, paneData.session_id, updatedSessions, activeSessionId);
+                        updatePaneStatus(paneEl, paneData.session_id, updatedSessions, activeSessionId, paneStatuses);
                     } else {
                         // 创建新 pane
                         paneEl = createPaneElement(paneData, layoutInfo);
-                        updatePaneStatus(paneEl, paneData.session_id, updatedSessions, activeSessionId);
+                        updatePaneStatus(paneEl, paneData.session_id, updatedSessions, activeSessionId, paneStatuses);
                         panesContainer.appendChild(paneEl);
                     }
                 });
@@ -986,6 +1233,8 @@
             existingPanes.forEach((el, id) => {
                 if (!newPaneIds.has(id)) {
                     el.remove();
+                    // 清理状态缓存
+                    delete previousStatuses[id];
                 }
             });
         }

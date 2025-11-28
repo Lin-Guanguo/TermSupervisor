@@ -2,13 +2,17 @@
 
 import asyncio
 import difflib
+import logging
 from datetime import datetime
 
 import iterm2
 
 from termsupervisor import config
-from termsupervisor.models import LayoutData, PaneSnapshot, UpdateCallback
+from termsupervisor.models import LayoutData, PaneSnapshot, UpdateCallback, PaneChange, PaneHistory
 from termsupervisor.iterm import get_layout
+from termsupervisor.analysis import create_analyzer, TaskStatus
+
+logger = logging.getLogger(__name__)
 
 
 class TermSupervisor:
@@ -29,6 +33,10 @@ class TermSupervisor:
         self.min_changed_lines = min_changed_lines
         self._callbacks: list[UpdateCallback] = []
         self.layout: LayoutData = LayoutData()
+
+        # 状态分析
+        self.pane_histories: dict[str, PaneHistory] = {}
+        self.analyzer = create_analyzer(config.ANALYZER_TYPE)
 
     def on_update(self, callback: UpdateCallback):
         """注册更新回调"""
@@ -74,6 +82,38 @@ class TermSupervisor:
 
         return len(changed_lines) >= self.min_changed_lines, changed_lines
 
+    def _create_pane_change(
+        self,
+        content: str,
+        changed_lines: list[str],
+    ) -> PaneChange:
+        """创建 PaneChange 记录"""
+        # 获取屏幕最后 N 行
+        lines = content.split('\n')
+        last_n_lines = lines[-config.SCREEN_LAST_N_LINES:]
+
+        # 构建变化摘要
+        added_lines = [l[1:] for l in changed_lines if l.startswith('+')]
+        diff_summary = ' | '.join(added_lines[:3])  # 取前 3 行新增内容
+
+        return PaneChange(
+            timestamp=datetime.now(),
+            change_type="significant",  # 默认，cleaner 会重新分类
+            diff_lines=changed_lines,
+            diff_summary=diff_summary,
+            last_n_lines=last_n_lines,
+            changed_line_count=len(changed_lines),
+        )
+
+    def _get_or_create_history(self, session_id: str, pane_name: str) -> PaneHistory:
+        """获取或创建 PaneHistory"""
+        if session_id not in self.pane_histories:
+            self.pane_histories[session_id] = PaneHistory(
+                session_id=session_id,
+                pane_name=pane_name,
+            )
+        return self.pane_histories[session_id]
+
     @staticmethod
     def _normalize_content(content: str) -> str:
         """标准化内容"""
@@ -95,6 +135,7 @@ class TermSupervisor:
         self.layout = await get_layout(app, self.exclude_names)
         now = datetime.now()
         updated_sessions = []
+        panes_to_analyze = []
 
         # 遍历所有 pane 检查更新
         for window in self.layout.windows:
@@ -120,6 +161,12 @@ class TermSupervisor:
                                 content=content,
                                 updated_at=now,
                             )
+
+                            # 记录变化到 PaneHistory
+                            history = self._get_or_create_history(pane.session_id, pane.name)
+                            pane_change = self._create_pane_change(content, changed_lines)
+                            history.add_change(pane_change)
+                            panes_to_analyze.append(history)
                     else:
                         print(f"[{now.strftime('%H:%M:%S')}] 发现新 Panel [{pane.index}]: {pane.name}")
                         self.snapshots[pane.session_id] = PaneSnapshot(
@@ -128,12 +175,35 @@ class TermSupervisor:
                             content=content,
                             updated_at=now,
                         )
+                        # 新 pane 也创建历史记录
+                        self._get_or_create_history(pane.session_id, pane.name)
+
+        # 执行状态分析
+        await self._analyze_panes(panes_to_analyze)
 
         # 检查已关闭的 session
         self._cleanup_closed_sessions(now)
 
         self.layout.updated_sessions = updated_sessions
         return updated_sessions
+
+    async def _analyze_panes(self, panes: list[PaneHistory]):
+        """分析需要分析的 pane 状态"""
+        for pane in panes:
+            if self.analyzer.should_analyze(pane):
+                try:
+                    old_status = pane.current_status
+                    new_status = await self.analyzer.analyze(pane)
+
+                    # 状态变化时记录日志
+                    if old_status != new_status:
+                        self._debug(f"Pane {pane.session_id} 状态: {old_status} -> {new_status.value}")
+
+                        # 需要通知的状态变化
+                        if new_status.needs_notification:
+                            print(f"[状态变化] {pane.pane_name}: {new_status.value} - {pane.status_reason}")
+                except Exception as e:
+                    logger.error(f"分析 pane {pane.session_id} 失败: {e}")
 
     def _log_update(self, now: datetime, pane, changed_lines: list[str]):
         """记录更新日志"""
@@ -160,6 +230,9 @@ class TermSupervisor:
             old_index = self.snapshots[session_id].index
             print(f"[{now.strftime('%H:%M:%S')}] Panel [{old_index}] {session_id} 已关闭")
             del self.snapshots[session_id]
+            # 同时清理 pane_histories
+            if session_id in self.pane_histories:
+                del self.pane_histories[session_id]
 
     async def run(self, connection: iterm2.Connection):
         """运行监控服务"""
@@ -185,5 +258,21 @@ class TermSupervisor:
         self._running = False
 
     def get_layout_dict(self) -> dict:
-        """获取布局数据字典"""
-        return self.layout.to_dict()
+        """获取布局数据字典（包含状态信息）"""
+        data = self.layout.to_dict()
+
+        # 添加状态信息到每个 pane
+        pane_statuses = {}
+        for session_id, history in self.pane_histories.items():
+            status = history.current_status
+            pane_statuses[session_id] = {
+                "status": status.value if status else "unknown",
+                "status_color": status.color if status else "gray",
+                "status_reason": history.status_reason,
+                "is_thinking": history.is_thinking,
+                "thinking_duration": round(history.get_thinking_duration(), 1),
+                "needs_notification": status.needs_notification if status else False,
+            }
+
+        data["pane_statuses"] = pane_statuses
+        return data

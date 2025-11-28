@@ -8,7 +8,9 @@ Monitor iTerm2 pane content changes with a real-time web dashboard.
 - **Unified Layout**: Displays all Windows and Tabs simultaneously in a responsive grid (4 tabs per row).
 - **Accurate Pane Mirroring**: Panes within each tab are rendered with relative positioning and aspect ratios matching the actual terminal layout.
 - **Content Change Detection**: Periodically scans all panes for content changes using diffs.
-- **Visual Notifications**: Panes flash green when content updates are detected.
+- **Status Analysis**: LLM-based analysis detects task states (running, waiting approval, completed, failed, etc.).
+- **Visual Notifications**: Panes flash green when content updates are detected, with status-based color coding.
+- **Active Pane Highlight**: Currently focused pane is visually highlighted.
 - **Interactive**: Click on any pane to activate that session in iTerm2.
 - **Right-click Rename**: Rename Windows, Tabs, and Sessions directly from the dashboard.
 - **Configurable**: Filter panes by name, adjust scan intervals, and set change thresholds.
@@ -17,7 +19,7 @@ Monitor iTerm2 pane content changes with a real-time web dashboard.
 
 ```
 src/termsupervisor/
-├── models.py           # Data models (PaneInfo, TabInfo, WindowInfo, LayoutData)
+├── models.py           # Data models (PaneInfo, TabInfo, WindowInfo, LayoutData, PaneHistory)
 ├── config.py           # Configuration constants
 ├── supervisor.py       # Monitor service (change detection, polling loop)
 ├── iterm/
@@ -27,6 +29,11 @@ src/termsupervisor/
 │   ├── app.py          # Application startup
 │   ├── server.py       # WebSocket server
 │   └── handlers.py     # Message handlers (activate, rename)
+├── analysis/
+│   ├── base.py         # StatusAnalyzer base class, TaskStatus enum
+│   ├── cleaner.py      # ChangeCleaner (debounce, similarity filtering)
+│   ├── llm.py          # LLM-based status analyzer
+│   └── rule_based.py   # Rule-based status analyzer
 └── templates/
     └── index.html      # Frontend dashboard
 ```
@@ -99,11 +106,18 @@ uv run termsupervisor
 Edit `src/termsupervisor/config.py`:
 
 ```python
-INTERVAL = 5.0                # Monitor interval (seconds)
-EXCLUDE_NAMES = ["supervisor"] # Excluded pane names (substring match)
-MIN_CHANGED_LINES = 3         # Minimum changed lines to trigger notification
-DEBUG = True                  # Debug mode (print change details)
-USER_NAME_VAR = "user.name"   # Variable name for custom names
+# Monitor settings
+INTERVAL = 3.0                     # Monitor interval (seconds)
+LONG_RUNNING_THRESHOLD = 15.0      # Long-running task threshold (seconds)
+EXCLUDE_NAMES = ["supervisor"]     # Excluded pane names (substring match)
+MIN_CHANGED_LINES = 5              # Minimum changed lines to trigger notification
+DEBUG = True                       # Debug mode (print change details)
+USER_NAME_VAR = "user.name"        # Variable name for custom names
+
+# Status analysis settings
+ANALYZER_TYPE = "llm"              # "llm" (default) | "rule"
+LLM_MODEL = "google/gemini-2.0-flash"
+LLM_TIMEOUT = 15.0
 ```
 
 ## Web Dashboard Features
