@@ -9,7 +9,7 @@ import iterm2
 
 from termsupervisor import config
 from termsupervisor.models import LayoutData, PaneSnapshot, UpdateCallback, PaneChange, PaneHistory
-from termsupervisor.iterm import get_layout
+from termsupervisor.iterm import get_layout, normalize_session_id, session_id_match
 from termsupervisor.analysis import create_analyzer, TaskStatus
 
 logger = logging.getLogger(__name__)
@@ -256,6 +256,32 @@ class TermSupervisor:
     def stop(self):
         """停止监控服务"""
         self._running = False
+
+    def get_pane_location(self, session_id: str) -> tuple[str, str, str]:
+        """获取 pane 所在的 window/tab 名称和 pane 名称
+
+        Returns:
+            (window_name, tab_name, pane_name)
+        """
+        tab_index = 0
+        for window in self.layout.windows:
+            for tab in window.tabs:
+                tab_index += 1
+                for pane in tab.panes:
+                    if session_id_match(pane.session_id, session_id):
+                        # Tab 名称：有名字用名字，否则用 Tab{序号}
+                        tab_display = tab.name if tab.name else f"Tab{tab_index}"
+                        return (
+                            window.name or "Window",
+                            tab_display,
+                            pane.name or "Pane"
+                        )
+        # 如果在 layout 中找不到，尝试从 pane_histories 获取名称
+        pure_id = normalize_session_id(session_id)
+        if pure_id in self.pane_histories:
+            pane_name = self.pane_histories[pure_id].pane_name
+            return ("Window", "Tab", pane_name or "Pane")
+        return ("Window", "Tab", "Pane")
 
     def get_layout_dict(self) -> dict:
         """获取布局数据字典（包含状态信息）"""

@@ -4,43 +4,8 @@ from typing import Union
 
 import iterm2
 
-from termsupervisor import config
 from termsupervisor.models import PaneInfo, TabInfo, WindowInfo, LayoutData
-
-
-async def get_name(obj, default: str = "") -> str:
-    """获取对象名称（优先使用 user.name，否则用内置变量）
-
-    iTerm2 变量参考:
-    - Session: name (标签栏显示名), presentationName, jobName
-    - Tab: title (标签栏完整标题)
-    - Window: titleOverride, number
-    """
-    # 优先使用自定义变量
-    user_name = await obj.async_get_variable(config.USER_NAME_VAR)
-    if user_name:
-        return user_name
-
-    # 使用 iTerm2 内置变量
-    if isinstance(obj, iterm2.Session):
-        # Session 使用 name 变量（标签栏显示的名称）
-        name = await obj.async_get_variable("name")
-        return name or default
-    elif isinstance(obj, iterm2.Tab):
-        # Tab 使用 title 变量
-        title = await obj.async_get_variable("title")
-        return title or default
-    elif isinstance(obj, iterm2.Window):
-        # Window 使用 titleOverride，如果没有则用 number
-        title = await obj.async_get_variable("titleOverride")
-        if title:
-            return title
-        number = await obj.async_get_variable("number")
-        if number is not None:
-            return f"Window {number}"
-        return default
-
-    return default
+from termsupervisor.iterm.naming import get_name
 
 
 async def traverse_node(

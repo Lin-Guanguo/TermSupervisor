@@ -2,7 +2,7 @@
 
 import iterm2
 
-from termsupervisor import config
+from termsupervisor.iterm.naming import set_session_name, set_tab_name, set_window_name
 
 
 class ITerm2Client:
@@ -43,9 +43,10 @@ class ITerm2Client:
             app = await self.get_app()
             for window in app.windows:
                 if window.window_id == window_id:
-                    await window.async_set_variable(config.USER_NAME_VAR, new_name)
-                    print(f"[ITerm2Client] Window {window_id} 重命名为: {new_name}")
-                    return True
+                    success = await set_window_name(window, new_name)
+                    if success:
+                        print(f"[ITerm2Client] Window {window_id} 重命名为: {new_name}")
+                    return success
             print(f"[ITerm2Client] 未找到 Window: {window_id}")
             return False
         except Exception as e:
@@ -53,16 +54,16 @@ class ITerm2Client:
             return False
 
     async def rename_tab(self, tab_id: str, new_name: str) -> bool:
-        """重命名 Tab（设置变量和标题）"""
+        """重命名 Tab"""
         try:
             app = await self.get_app()
             for window in app.windows:
                 for tab in window.tabs:
                     if tab.tab_id == tab_id:
-                        await tab.async_set_variable(config.USER_NAME_VAR, new_name)
-                        await tab.async_set_title(new_name)
-                        print(f"[ITerm2Client] Tab {tab_id} 重命名为: {new_name}")
-                        return True
+                        success = await set_tab_name(tab, new_name)
+                        if success:
+                            print(f"[ITerm2Client] Tab {tab_id} 重命名为: {new_name}")
+                        return success
             print(f"[ITerm2Client] 未找到 Tab: {tab_id}")
             return False
         except Exception as e:
@@ -70,15 +71,15 @@ class ITerm2Client:
             return False
 
     async def rename_session(self, session_id: str, new_name: str) -> bool:
-        """重命名 Session（同时设置变量和 title）"""
+        """重命名 Session"""
         try:
             app = await self.get_app()
             session = app.get_session_by_id(session_id)
             if session:
-                await session.async_set_variable(config.USER_NAME_VAR, new_name)
-                await session.async_set_name(new_name)
-                print(f"[ITerm2Client] Session {session_id} 重命名为: {new_name}")
-                return True
+                success = await set_session_name(session, new_name)
+                if success:
+                    print(f"[ITerm2Client] Session {session_id} 重命名为: {new_name}")
+                return success
             print(f"[ITerm2Client] 未找到 Session: {session_id}")
             return False
         except Exception as e:

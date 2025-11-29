@@ -39,6 +39,9 @@ async def setup_hook_system(
     # 设置状态变更回调 -> 广播到前端
     async def on_status_change(pane_id: str, status, reason: str, source: str):
         """状态变更时广播到前端"""
+        # 获取 pane 所在的 window/tab 名称
+        window_name, tab_name, pane_name = server.supervisor.get_pane_location(pane_id)
+        print(f"[HookStatus] pane_id={pane_id}, window={window_name}, tab={tab_name}, pane={pane_name}")
         await server.broadcast({
             "type": "hook_status",
             "pane_id": pane_id,
@@ -47,6 +50,9 @@ async def setup_hook_system(
             "reason": reason,
             "source": source,
             "needs_notification": status.needs_notification,
+            "window_name": window_name,
+            "tab_name": tab_name,
+            "pane_name": pane_name,
         })
 
     hook_manager.set_change_callback(on_status_change)

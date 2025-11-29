@@ -315,6 +315,7 @@
             color: #fff;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            z-index: 20;  /* 确保状态指示器在 SVG 之上 */
         }
         .pane-status.status-idle { background: #6e7681; }
         .pane-status.status-running { background: #1f6feb; }
@@ -1188,8 +1189,13 @@
 
         // 处理 Hook 状态更新
         function handleHookStatus(data) {
-            const { pane_id, status, status_color, reason, source, needs_notification } = data;
+            const { pane_id, status, status_color, reason, source, needs_notification,
+                    window_name, tab_name, pane_name } = data;
             console.log(`[Hook] ${source}: ${pane_id} -> ${status} (${reason})`);
+            console.log(`[Hook] 后端传来的名称: window=${window_name}, tab=${tab_name}, pane=${pane_name}`);
+            const location = getPaneLocation(pane_id);
+            console.log(`[Hook] 前端 currentLayout 中的名称:`, location);
+            console.log(`[Hook] currentLayout.windows 数量:`, currentLayout.windows?.length || 0);
 
             // 更新 pane_statuses 缓存
             if (!currentLayout.pane_statuses) {
@@ -1206,16 +1212,9 @@
             // 状态变化时，如果需要通知且不是已确认的，显示 toast
             const prevStatus = previousStatuses[pane_id];
             if (prevStatus !== status && needs_notification && !acknowledgedSessions.has(pane_id)) {
-                // 查找 pane 名称
-                let paneName = pane_id;
-                const paneEl = document.querySelector(`[data-session-id="${pane_id}"]`);
-                if (paneEl) {
-                    const content = paneEl.querySelector('strong')?.parentElement?.textContent;
-                    if (content) {
-                        paneName = content.replace(/^#\d+\s*/, '').trim();
-                    }
-                }
-                showToast(status, `[${source}] ${paneName}`, reason, pane_id);
+                // 使用 tab 名称（后端已处理：有名字用名字，否则用 Tab{序号}）
+                const title = `[${tab_name || 'Tab'}][${source}]`;
+                showToast(status, title, reason, pane_id);
             }
             previousStatuses[pane_id] = status;
 
@@ -1584,7 +1583,8 @@
                 'interrupted': 'stopped',
                 'unknown': ''
             };
-            return statusLabels[status] || status;
+            // 使用 in 检查，避免空字符串被当作 falsy
+            return status in statusLabels ? statusLabels[status] : status;
         }
 
         // ==================== 更新元素函数 ====================
@@ -1612,6 +1612,26 @@
 
         // 上一次的状态，用于检测状态变化发送通知
         let previousStatuses = {};
+
+        // 根据 sessionId 查找 pane 所在的 window/tab 名称
+        function getPaneLocation(sessionId) {
+            for (const window of (currentLayout.windows || [])) {
+                for (const tab of (window.tabs || [])) {
+                    for (const pane of (tab.panes || [])) {
+                        if (pane.session_id === sessionId) {
+                            // iTerm2 的 tab 名称通常和第一个 pane 的名称相同
+                            // 优先使用 pane.name 作为显示名称
+                            return {
+                                windowName: window.name,
+                                tabName: tab.name,
+                                paneName: pane.name
+                            };
+                        }
+                    }
+                }
+            }
+            return { windowName: null, tabName: null, paneName: null };
+        }
 
         function updatePaneStatus(paneEl, sessionId, updatedSessions, activeSessionId, paneStatuses) {
             const shouldBeUpdated = updatedSessions.includes(sessionId);
@@ -1652,8 +1672,11 @@
             // 状态变化时，如果是新的需要通知的状态，清除已确认标记并发送通知
             if (prevStatus !== status && needsNotification) {
                 acknowledgedSessions.delete(sessionId);
-                const paneName = paneEl.querySelector('strong')?.parentElement?.textContent?.replace(/^#\d+\s*/, '') || sessionId;
-                showToast(status, paneName, statusReason, sessionId);
+                // 使用 tab 名称
+                const location = getPaneLocation(sessionId);
+                const source = statusInfo.source || 'unknown';
+                const title = `[${location.tabName || 'Tab'}][${source}]`;
+                showToast(status, title, statusReason, sessionId);
             }
             previousStatuses[sessionId] = status;
 
