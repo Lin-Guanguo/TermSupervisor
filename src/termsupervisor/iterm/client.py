@@ -15,6 +15,15 @@ class ITerm2Client:
         """获取 iTerm2 App 实例"""
         return await iterm2.async_get_app(self.connection)
 
+    async def get_session_by_id(self, session_id: str) -> iterm2.Session | None:
+        """根据 session_id 获取 Session 对象"""
+        try:
+            app = await self.get_app()
+            return app.get_session_by_id(session_id)
+        except Exception as e:
+            print(f"[ITerm2Client] 获取 session {session_id} 失败: {e}")
+            return None
+
     async def activate_session(self, session_id: str) -> bool:
         """激活指定的 session"""
         try:

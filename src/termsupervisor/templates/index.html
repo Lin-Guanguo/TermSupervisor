@@ -187,16 +187,39 @@
             border: 2px solid #484f58;
             border-radius: 4px;
             display: flex;
-            align-items: center;
-            justify-content: center;
+            align-items: stretch;
+            justify-content: stretch;
             font-size: 11px;
             text-align: center;
-            padding: 4px;
+            padding: 0;
             overflow: hidden;
             cursor: pointer;
             transition: all 0.2s ease;
             color: #c9d1d9;
             z-index: 1;
+        }
+        .pane-svg-container {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            display: flex;
+            align-items: flex-start;
+            justify-content: flex-start;
+        }
+        .pane-svg-container object {
+            width: 100%;
+            height: 100%;
+            transform-origin: top left;
+            pointer-events: none;
+        }
+        /* Fallback 内容显示 */
+        .pane-fallback {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
+            padding: 4px;
         }
         .pane:hover { 
             border-color: #58a6ff; 
@@ -747,6 +770,10 @@
                 currentLayout = data;
                 updateSessionTracker(data.updated_sessions || [], data.active_session_id);
                 render();
+                // 刷新有更新的 pane 的 SVG
+                if (data.updated_sessions && data.updated_sessions.length > 0) {
+                    refreshUpdatedPanes(data.updated_sessions);
+                }
             };
         }
 
@@ -993,10 +1020,24 @@
             statusEl.dataset.statusIndicator = 'true';
             paneEl.appendChild(statusEl);
 
-            // 内容区
-            const contentEl = document.createElement('div');
-            contentEl.innerHTML = `<strong>#${paneData.index}</strong><br>${paneData.name || 'Pane'}`;
-            paneEl.appendChild(contentEl);
+            // SVG 容器
+            const svgContainer = document.createElement('div');
+            svgContainer.className = 'pane-svg-container';
+
+            // 使用 object 标签加载 SVG
+            const svgObject = document.createElement('object');
+            svgObject.type = 'image/svg+xml';
+            svgObject.data = `/api/pane/${paneData.session_id}/svg`;
+            svgObject.dataset.sessionId = paneData.session_id;
+
+            // Fallback 内容
+            const fallbackEl = document.createElement('div');
+            fallbackEl.className = 'pane-fallback';
+            fallbackEl.innerHTML = `<strong>#${paneData.index}</strong><br>${paneData.name || 'Pane'}`;
+            svgObject.appendChild(fallbackEl);
+
+            svgContainer.appendChild(svgObject);
+            paneEl.appendChild(svgContainer);
 
             const debugInfo = `Raw: ${Math.round(paneData.x)},${Math.round(paneData.y)} ${Math.round(paneData.width)}x${Math.round(paneData.height)}\nCalc: ${left.toFixed(1)}%, ${top.toFixed(1)}%`;
             paneEl.title = `[${paneData.index}] ${paneData.session_id}\n${debugInfo}`;
@@ -1009,6 +1050,25 @@
             paneEl.oncontextmenu = (e) => showContextMenu(e, 'session', paneData.session_id, paneData.name);
 
             return paneEl;
+        }
+
+        // 刷新指定 pane 的 SVG
+        function refreshPaneSvg(sessionId) {
+            const paneEl = document.querySelector(`[data-session-id="${sessionId}"]`);
+            if (!paneEl) return;
+
+            const svgObject = paneEl.querySelector('object[data-session-id]');
+            if (svgObject) {
+                // 强制刷新 SVG，添加时间戳避免缓存
+                svgObject.data = `/api/pane/${sessionId}/svg?t=${Date.now()}`;
+            }
+        }
+
+        // 刷新所有有更新的 pane 的 SVG
+        function refreshUpdatedPanes(updatedSessions) {
+            updatedSessions.forEach(sessionId => {
+                refreshPaneSvg(sessionId);
+            });
         }
 
         // 获取状态显示文本
