@@ -452,65 +452,216 @@
         }
         .modal-btn:hover { opacity: 0.9; }
 
-        /* Toast 通知 */
-        .toast-container {
+        /* 消息通知面板 */
+        .notification-panel {
             position: fixed;
-            top: 20px;
-            right: 20px;
+            bottom: 12px;
+            left: 12px;
+            right: 12px;
+            height: 25vh;
+            min-height: 150px;
+            max-height: 300px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
             z-index: 3000;
             display: flex;
             flex-direction: column;
-            gap: 10px;
-            max-width: 320px;
-            pointer-events: none;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+            overflow: hidden;
         }
-        .toast {
+        .notification-panel.collapsed {
+            height: auto;
+            min-height: auto;
+        }
+        .notification-panel.collapsed .notification-list {
+            display: none;
+        }
+        .notification-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 16px;
             background: #21262d;
-            border: 1px solid #30363d;
-            border-radius: 8px;
-            padding: 12px 16px;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-            animation: toastIn 0.3s ease-out;
-            pointer-events: auto;
+            border-bottom: 1px solid #30363d;
             cursor: pointer;
+            flex-shrink: 0;
         }
-        .toast.fade-out {
-            animation: toastOut 0.5s ease-out forwards;
+        .notification-header:hover {
+            background: #282e36;
         }
-        @keyframes toastIn {
-            from { opacity: 0; transform: translateX(100%); }
-            to { opacity: 1; transform: translateX(0); }
-        }
-        @keyframes toastOut {
-            from { opacity: 1; transform: translateX(0); }
-            to { opacity: 0; transform: translateX(100%); }
-        }
-        .toast-header {
+        .notification-header-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #e6edf3;
             display: flex;
             align-items: center;
             gap: 8px;
-            margin-bottom: 6px;
         }
-        .toast-status {
+        .notification-count {
+            background: #da3633;
+            color: #fff;
             font-size: 11px;
-            padding: 2px 8px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            min-width: 18px;
+            text-align: center;
+        }
+        .notification-count.zero {
+            background: #484f58;
+        }
+        .notification-header-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .notification-clear-btn {
+            background: transparent;
+            border: none;
+            color: #8b949e;
+            font-size: 11px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+        .notification-clear-btn:hover {
+            background: #30363d;
+            color: #e6edf3;
+        }
+        .notification-toggle {
+            color: #8b949e;
+            font-size: 14px;
+            transition: transform 0.2s;
+        }
+        .notification-panel.collapsed .notification-toggle {
+            transform: rotate(180deg);
+        }
+        .notification-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .notification-item {
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 10px 12px;
+            animation: notificationIn 0.3s ease-out;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+        .notification-item:hover {
+            background: #282e36;
+        }
+        .notification-item.selected {
+            background: #1f3a5f;
+            border-color: #58a6ff;
+        }
+        .notification-item.fade-out {
+            animation: notificationOut 0.3s ease-out forwards;
+        }
+        .notification-item-content {
+            flex: 1;
+            min-width: 0;
+        }
+        .notification-delete-btn {
+            background: transparent;
+            border: none;
+            color: #6e7681;
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+            font-size: 14px;
+            line-height: 1;
+            flex-shrink: 0;
+            opacity: 0;
+            transition: opacity 0.15s, background 0.15s, color 0.15s;
+        }
+        .notification-item:hover .notification-delete-btn,
+        .notification-item.selected .notification-delete-btn {
+            opacity: 1;
+        }
+        .notification-delete-btn:hover {
+            background: #da3633;
+            color: #fff;
+        }
+        @keyframes notificationIn {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+                max-height: 0;
+                padding: 0 12px;
+                margin-bottom: -8px;
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+                max-height: 100px;
+                padding: 10px 12px;
+                margin-bottom: 0;
+            }
+        }
+        @keyframes notificationOut {
+            from {
+                opacity: 1;
+                transform: translateX(0);
+            }
+            to {
+                opacity: 0;
+                transform: translateX(100%);
+            }
+        }
+        .notification-item-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+        .notification-status {
+            font-size: 10px;
+            padding: 2px 6px;
             border-radius: 3px;
             text-transform: uppercase;
             font-weight: 600;
         }
-        .toast-status.status-waiting_approval { background: #d29922; color: #000; }
-        .toast-status.status-completed { background: #238636; color: #fff; }
-        .toast-status.status-failed { background: #da3633; color: #fff; }
-        .toast-status.status-interrupted { background: #db6d28; color: #fff; }
-        .toast-title {
-            font-size: 13px;
+        .notification-status.status-waiting_approval { background: #d29922; color: #000; }
+        .notification-status.status-completed { background: #238636; color: #fff; }
+        .notification-status.status-failed { background: #da3633; color: #fff; }
+        .notification-status.status-interrupted { background: #db6d28; color: #fff; }
+        .notification-title {
+            font-size: 12px;
             color: #e6edf3;
             font-weight: 500;
+            flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
-        .toast-body {
-            font-size: 12px;
+        .notification-time {
+            font-size: 10px;
+            color: #6e7681;
+        }
+        .notification-body {
+            font-size: 11px;
             color: #8b949e;
             line-height: 1.4;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .notification-empty {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #6e7681;
+            font-size: 13px;
         }
 
         /* 移动端响应式 */
@@ -593,6 +744,23 @@
             .layout-grid {
                 gap: 10px;
             }
+            .notification-panel {
+                left: 8px;
+                right: 8px;
+                bottom: 8px;
+            }
+            .notification-item {
+                padding: 12px;
+            }
+            .notification-status {
+                font-size: 11px;
+            }
+            .notification-title {
+                font-size: 13px;
+            }
+            .notification-body {
+                font-size: 12px;
+            }
         }
     </style>
 </head>
@@ -620,8 +788,22 @@
         <div class="context-menu-item" id="menuHideTab" style="display: none;">Hide Tab</div>
     </div>
 
-    <!-- Toast 通知容器 -->
-    <div class="toast-container" id="toastContainer"></div>
+    <!-- 通知面板 -->
+    <div class="notification-panel" id="notificationPanel">
+        <div class="notification-header" id="notificationHeader">
+            <div class="notification-header-title">
+                <span>Notifications</span>
+                <span class="notification-count zero" id="notificationCount">0</span>
+            </div>
+            <div class="notification-header-actions">
+                <button class="notification-clear-btn" id="notificationClear">Clear all</button>
+                <span class="notification-toggle">▼</span>
+            </div>
+        </div>
+        <div class="notification-list" id="notificationList">
+            <div class="notification-empty">No notifications</div>
+        </div>
+    </div>
 
     <!-- 编辑弹窗 -->
     <div class="modal-overlay" id="modalOverlay">
@@ -640,15 +822,93 @@
         let currentLayout = { windows: [], updated_sessions: [], pane_statuses: {} };
         let tabsPerRow = 4; // 默认每行4个tab
 
-        // Toast 通知系统
-        const toastContainer = document.getElementById('toastContainer');
-        const TOAST_DURATION = 5000; // 显示 5 秒
-        const TOAST_FADE_DURATION = 500; // 渐隐 0.5 秒
+        // 通知面板系统
+        const notificationPanel = document.getElementById('notificationPanel');
+        const notificationHeader = document.getElementById('notificationHeader');
+        const notificationList = document.getElementById('notificationList');
+        const notificationCount = document.getElementById('notificationCount');
+        const notificationClear = document.getElementById('notificationClear');
+        const NOTIFICATION_FADE_DURATION = 300;
+        let notifications = []; // 存储所有通知
 
-        function showToast(status, title, body) {
-            const toast = document.createElement('div');
-            toast.className = 'toast';
+        // 从 localStorage 恢复面板折叠状态
+        const savedPanelCollapsed = localStorage.getItem('notificationPanelCollapsed');
+        if (savedPanelCollapsed === 'true') {
+            notificationPanel.classList.add('collapsed');
+        }
 
+        // 点击 header 折叠/展开
+        notificationHeader.addEventListener('click', (e) => {
+            if (e.target.closest('.notification-clear-btn')) return;
+            notificationPanel.classList.toggle('collapsed');
+            localStorage.setItem('notificationPanelCollapsed', notificationPanel.classList.contains('collapsed'));
+        });
+
+        // 清空所有通知
+        notificationClear.addEventListener('click', (e) => {
+            e.stopPropagation();
+            clearAllNotifications();
+        });
+
+        function showToast(status, title, body, sessionId = null) {
+            const notification = {
+                id: Date.now(),
+                status,
+                title,
+                body,
+                time: new Date(),
+                sessionId
+            };
+
+            notifications.unshift(notification);
+            renderNotifications();
+
+            // 如果面板是折叠的，展开它
+            if (notificationPanel.classList.contains('collapsed')) {
+                notificationPanel.classList.remove('collapsed');
+                localStorage.setItem('notificationPanelCollapsed', 'false');
+            }
+        }
+
+        function removeNotification(id) {
+            const item = notificationList.querySelector(`[data-notification-id="${id}"]`);
+            if (item && !item.classList.contains('fade-out')) {
+                item.classList.add('fade-out');
+                setTimeout(() => {
+                    notifications = notifications.filter(n => n.id !== id);
+                    renderNotifications();
+                }, NOTIFICATION_FADE_DURATION);
+            }
+        }
+
+        function clearAllNotifications() {
+            notifications = [];
+            renderNotifications();
+        }
+
+        function formatTime(date) {
+            const now = new Date();
+            const diff = now - date;
+            if (diff < 60000) return 'just now';
+            if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+
+        let selectedNotificationId = null;
+
+        function selectNotification(id, sessionId) {
+            selectedNotificationId = id;
+            // 更新选中状态
+            notificationList.querySelectorAll('.notification-item').forEach(item => {
+                item.classList.toggle('selected', parseInt(item.dataset.notificationId) === id);
+            });
+            // 如果有 sessionId，激活对应的 pane
+            if (sessionId) {
+                ws.send('activate:' + sessionId);
+            }
+        }
+
+        function renderNotifications() {
             const statusLabels = {
                 'waiting_approval': 'APPROVAL',
                 'completed': 'DONE',
@@ -656,28 +916,51 @@
                 'interrupted': 'STOPPED'
             };
 
-            toast.innerHTML = `
-                <div class="toast-header">
-                    <span class="toast-status status-${status}">${statusLabels[status] || status}</span>
-                    <span class="toast-title">${title}</span>
+            // 更新计数
+            notificationCount.textContent = notifications.length;
+            notificationCount.classList.toggle('zero', notifications.length === 0);
+
+            if (notifications.length === 0) {
+                notificationList.innerHTML = '<div class="notification-empty">No notifications</div>';
+                selectedNotificationId = null;
+                return;
+            }
+
+            notificationList.innerHTML = notifications.map(n => `
+                <div class="notification-item${n.id === selectedNotificationId ? ' selected' : ''}" data-notification-id="${n.id}" data-session-id="${n.sessionId || ''}">
+                    <div class="notification-item-content">
+                        <div class="notification-item-header">
+                            <span class="notification-status status-${n.status}">${statusLabels[n.status] || n.status}</span>
+                            <span class="notification-title">${n.title}</span>
+                            <span class="notification-time">${formatTime(n.time)}</span>
+                        </div>
+                        <div class="notification-body">${n.body}</div>
+                    </div>
+                    <button class="notification-delete-btn" title="Delete">🗑</button>
                 </div>
-                <div class="toast-body">${body}</div>
-            `;
+            `).join('');
 
-            // 点击关闭
-            toast.onclick = () => removeToast(toast);
+            // 绑定点击事件
+            notificationList.querySelectorAll('.notification-item').forEach(item => {
+                const id = parseInt(item.dataset.notificationId);
+                const sessionId = item.dataset.sessionId;
 
-            toastContainer.appendChild(toast);
+                // 点击消息选中并跳转
+                item.addEventListener('click', (e) => {
+                    if (e.target.closest('.notification-delete-btn')) return;
+                    selectNotification(id, sessionId);
+                });
 
-            // 自动消失
-            setTimeout(() => removeToast(toast), TOAST_DURATION);
+                // 点击删除按钮
+                item.querySelector('.notification-delete-btn').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    removeNotification(id);
+                });
+            });
         }
 
-        function removeToast(toast) {
-            if (toast.classList.contains('fade-out')) return;
-            toast.classList.add('fade-out');
-            setTimeout(() => toast.remove(), TOAST_FADE_DURATION);
-        }
+        // 初始化渲染
+        renderNotifications();
 
         // 配置变化监听
         document.getElementById('tabsPerRow').addEventListener('change', (e) => {
@@ -932,7 +1215,7 @@
                         paneName = content.replace(/^#\d+\s*/, '').trim();
                     }
                 }
-                showToast(status, `[${source}] ${paneName}`, reason);
+                showToast(status, `[${source}] ${paneName}`, reason, pane_id);
             }
             previousStatuses[pane_id] = status;
 
@@ -1370,7 +1653,7 @@
             if (prevStatus !== status && needsNotification) {
                 acknowledgedSessions.delete(sessionId);
                 const paneName = paneEl.querySelector('strong')?.parentElement?.textContent?.replace(/^#\d+\s*/, '') || sessionId;
-                showToast(status, paneName, statusReason);
+                showToast(status, paneName, statusReason, sessionId);
             }
             previousStatuses[sessionId] = status;
 
