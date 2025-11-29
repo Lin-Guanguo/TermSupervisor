@@ -334,21 +334,65 @@
             background: rgba(218, 54, 51, 0.15) !important;
         }
 
-        /* RUNNING/LONG_RUNNING 状态 - 呼吸发光边框 */
+        /* RUNNING/LONG_RUNNING 状态 - 旋转渐变边框 */
         .pane.status-running,
         .pane.status-long_running {
-            border-color: #58a6ff !important;
-            background: rgba(31, 111, 235, 0.1) !important;
-            animation: runningGlow 1.5s ease-in-out infinite !important;
+            overflow: visible !important;
+            border-color: transparent !important;
+            background: #0d1117 !important;
         }
-        @keyframes runningGlow {
-            0%, 100% {
-                border-color: #1f6feb;
-                box-shadow: 0 0 4px rgba(31, 111, 235, 0.5), inset 0 0 8px rgba(31, 111, 235, 0.1);
+        .pane.status-running::before,
+        .pane.status-long_running::before {
+            content: '';
+            position: absolute;
+            top: -2px;
+            left: -2px;
+            right: -2px;
+            bottom: -2px;
+            border-radius: 8px;
+            background: conic-gradient(
+                from var(--rotation-angle, 0deg),
+                /* 蓝色段 1: 0-90° */
+                rgba(74, 126, 184, 0.3) 0deg,
+                rgba(74, 126, 184, 0.8) 45deg,
+                rgba(74, 126, 184, 0.3) 90deg,
+                /* 灰色段 1: 90-180° */
+                rgba(48, 54, 61, 1) 90deg,
+                rgba(48, 54, 61, 1) 180deg,
+                /* 蓝色段 2: 180-270° */
+                rgba(74, 126, 184, 0.3) 180deg,
+                rgba(74, 126, 184, 0.8) 225deg,
+                rgba(74, 126, 184, 0.3) 270deg,
+                /* 灰色段 2: 270-360° */
+                rgba(48, 54, 61, 1) 270deg,
+                rgba(48, 54, 61, 1) 360deg
+            );
+            animation: rotatingBorder 4s linear infinite;
+            z-index: -1;
+        }
+        .pane.status-running::after,
+        .pane.status-long_running::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            border-radius: 4px;
+            background: #0d1117;
+            z-index: -1;
+        }
+        @property --rotation-angle {
+            syntax: '<angle>';
+            initial-value: 0deg;
+            inherits: false;
+        }
+        @keyframes rotatingBorder {
+            0% {
+                --rotation-angle: 0deg;
             }
-            50% {
-                border-color: #58a6ff;
-                box-shadow: 0 0 12px rgba(88, 166, 255, 0.8), inset 0 0 12px rgba(88, 166, 255, 0.2);
+            100% {
+                --rotation-angle: 360deg;
             }
         }
         .status {
@@ -543,12 +587,14 @@
             border: 1px solid #30363d;
             border-radius: 6px;
             padding: 10px 12px;
-            animation: notificationIn 0.3s ease-out;
             cursor: pointer;
-            transition: background 0.15s, border-color 0.15s;
+            transition: background 0.15s, border-color 0.15s, transform 0.3s ease-out, opacity 0.3s ease-out;
             display: flex;
             align-items: flex-start;
             gap: 10px;
+        }
+        .notification-item.new {
+            animation: notificationSlideIn 0.3s ease-out;
         }
         .notification-item:hover {
             background: #282e36;
@@ -585,20 +631,14 @@
             background: #da3633;
             color: #fff;
         }
-        @keyframes notificationIn {
+        @keyframes notificationSlideIn {
             from {
                 opacity: 0;
-                transform: translateY(-20px);
-                max-height: 0;
-                padding: 0 12px;
-                margin-bottom: -8px;
+                transform: translateY(-10px);
             }
             to {
                 opacity: 1;
                 transform: translateY(0);
-                max-height: 100px;
-                padding: 10px 12px;
-                margin-bottom: 0;
             }
         }
         @keyframes notificationOut {
@@ -865,7 +905,9 @@
             };
 
             notifications.unshift(notification);
-            renderNotifications();
+
+            // 增量插入新通知，而不是重新渲染整个列表
+            insertNotification(notification);
 
             // 如果面板是折叠的，展开它
             if (notificationPanel.classList.contains('collapsed')) {
@@ -874,13 +916,78 @@
             }
         }
 
+        // 创建单个通知元素
+        function createNotificationElement(n, isNew = false) {
+            const statusLabels = {
+                'idle': 'IDLE',
+                'running': 'RUNNING',
+                'long_running': 'LONG RUN',
+                'waiting_approval': 'APPROVAL',
+                'done': 'DONE',
+                'failed': 'FAILED'
+            };
+
+            const item = document.createElement('div');
+            item.className = `notification-item${n.id === selectedNotificationId ? ' selected' : ''}${isNew ? ' new' : ''}`;
+            item.dataset.notificationId = n.id;
+            item.dataset.sessionId = n.sessionId || '';
+            item.innerHTML = `
+                <div class="notification-item-content">
+                    <div class="notification-item-header">
+                        <span class="notification-status status-${n.status}">${statusLabels[n.status] || n.status}</span>
+                        <span class="notification-title">${n.title}</span>
+                        <span class="notification-time">${formatTime(n.time)}</span>
+                    </div>
+                    <div class="notification-body">${n.body}</div>
+                </div>
+                <button class="notification-delete-btn" title="Delete">🗑</button>
+            `;
+
+            // 绑定事件
+            item.addEventListener('click', (e) => {
+                if (e.target.closest('.notification-delete-btn')) return;
+                selectNotification(n.id, n.sessionId);
+            });
+            item.querySelector('.notification-delete-btn').addEventListener('click', (e) => {
+                e.stopPropagation();
+                removeNotification(n.id);
+            });
+
+            return item;
+        }
+
+        // 增量插入新通知
+        function insertNotification(notification) {
+            // 更新计数
+            notificationCount.textContent = notifications.length;
+            notificationCount.classList.toggle('zero', notifications.length === 0);
+
+            // 如果之前是空的，先清空 empty 提示
+            const emptyEl = notificationList.querySelector('.notification-empty');
+            if (emptyEl) {
+                emptyEl.remove();
+            }
+
+            // 创建新元素并插入到最前面
+            const newItem = createNotificationElement(notification, true);
+            notificationList.insertBefore(newItem, notificationList.firstChild);
+        }
+
         function removeNotification(id) {
             const item = notificationList.querySelector(`[data-notification-id="${id}"]`);
             if (item && !item.classList.contains('fade-out')) {
                 item.classList.add('fade-out');
                 setTimeout(() => {
                     notifications = notifications.filter(n => n.id !== id);
-                    renderNotifications();
+                    item.remove();
+                    // 更新计数
+                    notificationCount.textContent = notifications.length;
+                    notificationCount.classList.toggle('zero', notifications.length === 0);
+                    // 如果没有通知了，显示空状态
+                    if (notifications.length === 0) {
+                        notificationList.innerHTML = '<div class="notification-empty">No notifications</div>';
+                        selectedNotificationId = null;
+                    }
                 }, NOTIFICATION_FADE_DURATION);
             }
         }
@@ -913,15 +1020,6 @@
         }
 
         function renderNotifications() {
-            const statusLabels = {
-                'idle': 'IDLE',
-                'running': 'RUNNING',
-                'long_running': 'LONG RUN',
-                'waiting_approval': 'APPROVAL',
-                'done': 'DONE',
-                'failed': 'FAILED'
-            };
-
             // 更新计数
             notificationCount.textContent = notifications.length;
             notificationCount.classList.toggle('zero', notifications.length === 0);
@@ -932,36 +1030,11 @@
                 return;
             }
 
-            notificationList.innerHTML = notifications.map(n => `
-                <div class="notification-item${n.id === selectedNotificationId ? ' selected' : ''}" data-notification-id="${n.id}" data-session-id="${n.sessionId || ''}">
-                    <div class="notification-item-content">
-                        <div class="notification-item-header">
-                            <span class="notification-status status-${n.status}">${statusLabels[n.status] || n.status}</span>
-                            <span class="notification-title">${n.title}</span>
-                            <span class="notification-time">${formatTime(n.time)}</span>
-                        </div>
-                        <div class="notification-body">${n.body}</div>
-                    </div>
-                    <button class="notification-delete-btn" title="Delete">🗑</button>
-                </div>
-            `).join('');
-
-            // 绑定点击事件
-            notificationList.querySelectorAll('.notification-item').forEach(item => {
-                const id = parseInt(item.dataset.notificationId);
-                const sessionId = item.dataset.sessionId;
-
-                // 点击消息选中并跳转
-                item.addEventListener('click', (e) => {
-                    if (e.target.closest('.notification-delete-btn')) return;
-                    selectNotification(id, sessionId);
-                });
-
-                // 点击删除按钮
-                item.querySelector('.notification-delete-btn').addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    removeNotification(id);
-                });
+            // 清空并重新渲染所有通知（用于初始化或清空后）
+            notificationList.innerHTML = '';
+            notifications.forEach(n => {
+                const item = createNotificationElement(n, false);
+                notificationList.appendChild(item);
             });
         }
 
