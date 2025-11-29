@@ -2,6 +2,9 @@
 
 Monitor iTerm2 pane content changes with a real-time web dashboard.
 
+![TermSupervisor + iTerm2](docs/image.jpg)
+*Left: iTerm2 with multiple panes | Right: TermSupervisor dashboard mirroring the layout in real-time*
+
 ## Features
 
 - **Real-time Web Dashboard**: Visualizes your entire iTerm2 environment with SVG terminal rendering
