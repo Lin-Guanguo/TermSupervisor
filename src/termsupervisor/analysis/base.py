@@ -9,40 +9,66 @@ if TYPE_CHECKING:
 
 
 class TaskStatus(Enum):
-    """任务状态枚举"""
-    UNKNOWN = "unknown"
+    """任务状态枚举
+
+    状态设计（6 个）：
+    - IDLE: 空闲，等待输入
+    - RUNNING: 执行中（< 60s）
+    - LONG_RUNNING: 执行超过 60s
+    - WAITING_APPROVAL: 等待权限确认
+    - DONE: 完成待确认
+    - FAILED: 失败待确认
+    """
     IDLE = "idle"
     RUNNING = "running"
-    THINKING = "thinking"
+    LONG_RUNNING = "long_running"
     WAITING_APPROVAL = "waiting_approval"
-    COMPLETED = "completed"
+    DONE = "done"
     FAILED = "failed"
-    INTERRUPTED = "interrupted"
 
     @property
     def needs_notification(self) -> bool:
         """是否需要通知用户"""
         return self in {
             TaskStatus.WAITING_APPROVAL,
-            TaskStatus.COMPLETED,
+            TaskStatus.DONE,
             TaskStatus.FAILED,
-            TaskStatus.INTERRUPTED,
+        }
+
+    @property
+    def needs_attention(self) -> bool:
+        """是否需要用户关注（边框闪烁 + 状态闪烁）"""
+        return self in {
+            TaskStatus.WAITING_APPROVAL,
+            TaskStatus.DONE,
+            TaskStatus.FAILED,
+        }
+
+    @property
+    def is_running(self) -> bool:
+        """是否为运行中状态（边框转圈）"""
+        return self in {
+            TaskStatus.RUNNING,
+            TaskStatus.LONG_RUNNING,
         }
 
     @property
     def color(self) -> str:
         """状态对应的颜色"""
         colors = {
-            TaskStatus.UNKNOWN: "gray",
             TaskStatus.IDLE: "gray",
             TaskStatus.RUNNING: "blue",
-            TaskStatus.THINKING: "purple",
+            TaskStatus.LONG_RUNNING: "darkblue",
             TaskStatus.WAITING_APPROVAL: "yellow",
-            TaskStatus.COMPLETED: "green",
+            TaskStatus.DONE: "green",
             TaskStatus.FAILED: "red",
-            TaskStatus.INTERRUPTED: "orange",
         }
         return colors.get(self, "gray")
+
+    @property
+    def display(self) -> bool:
+        """是否需要前端显示"""
+        return self != TaskStatus.IDLE
 
 
 class StatusAnalyzer(ABC):

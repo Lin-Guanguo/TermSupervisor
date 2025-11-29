@@ -7,7 +7,6 @@ import iterm2
 
 from ..sources.base import HookSource
 from ..prompt_monitor import PromptMonitorManager
-from ...analysis.base import TaskStatus
 
 if TYPE_CHECKING:
     from ..manager import HookManager
@@ -24,6 +23,10 @@ class ShellHookSource(HookSource):
     前提条件：
     - iTerm2 Python API 已启用
     - Shell Integration 已安装
+
+    Signal 格式：
+    - shell.command_start: 命令开始
+    - shell.command_end: 命令结束
     """
 
     source_name = "shell"
@@ -69,28 +72,11 @@ class ShellHookSource(HookSource):
             command = str(info) if info else ""
             self._current_commands[session_id] = command
 
-            await self.manager.update_status(
-                pane_id=session_id,
-                source=self.source_name,
-                status=TaskStatus.RUNNING,
-                reason=f"执行: {command[:30]}..." if len(command) > 30 else f"执行: {command}",
-                event_type="command_start",
-                raw_data={"command": command}
-            )
+            await self.manager.process_shell_command_start(session_id, command)
 
         elif event_type == "command_end":
             # 命令结束
             exit_code = int(info) if info else 0
-            command = self._current_commands.pop(session_id, "")
+            self._current_commands.pop(session_id, "")
 
-            status = TaskStatus.COMPLETED if exit_code == 0 else TaskStatus.FAILED
-            reason = "命令执行完成" if exit_code == 0 else f"命令失败 (exit={exit_code})"
-
-            await self.manager.update_status(
-                pane_id=session_id,
-                source=self.source_name,
-                status=status,
-                reason=reason,
-                event_type="command_end",
-                raw_data={"command": command, "exit_code": exit_code}
-            )
+            await self.manager.process_shell_command_end(session_id, exit_code)
