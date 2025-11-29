@@ -20,8 +20,13 @@ USER_NAME_VAR = "user.name"
 
 # === 状态分析配置 ===
 
-# 分析器类型: "rule" (规则引擎) | "llm" (LLM 分析)
-ANALYZER_TYPE = "rule"
+# 分析器类型: "hook" (Hook 系统) | "rule" (规则引擎) | "llm" (LLM 分析)
+# hook: 基于外部 Hook 事件（推荐，准确度最高，成本为零）
+#       - Shell Layer: iTerm2 PromptMonitor（命令开始/结束）
+#       - Claude Code Layer: HTTP Hook（thinking/approval/completed）
+# rule: 基于规则模式匹配
+# llm: 基于 LLM 分析
+ANALYZER_TYPE = "hook"
 
 # LLM 分析器配置
 LLM_MODEL = "google/gemini-2.5-flash"

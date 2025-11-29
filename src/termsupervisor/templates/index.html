@@ -738,11 +738,53 @@
                     console.log('Create tab result:', data.window_id, data.success);
                     return;
                 }
+                // Hook 状态更新（来自 Claude Code 等外部工具）
+                if (data.type === 'hook_status') {
+                    handleHookStatus(data);
+                    return;
+                }
                 // 布局更新
                 currentLayout = data;
                 updateSessionTracker(data.updated_sessions || [], data.active_session_id);
                 render();
             };
+        }
+
+        // 处理 Hook 状态更新
+        function handleHookStatus(data) {
+            const { pane_id, status, status_color, reason, source, needs_notification } = data;
+            console.log(`[Hook] ${source}: ${pane_id} -> ${status} (${reason})`);
+
+            // 更新 pane_statuses 缓存
+            if (!currentLayout.pane_statuses) {
+                currentLayout.pane_statuses = {};
+            }
+            currentLayout.pane_statuses[pane_id] = {
+                status: status,
+                status_color: status_color,
+                status_reason: reason,
+                needs_notification: needs_notification,
+                source: source,
+            };
+
+            // 状态变化时，如果需要通知且不是已确认的，显示 toast
+            const prevStatus = previousStatuses[pane_id];
+            if (prevStatus !== status && needs_notification && !acknowledgedSessions.has(pane_id)) {
+                // 查找 pane 名称
+                let paneName = pane_id;
+                const paneEl = document.querySelector(`[data-session-id="${pane_id}"]`);
+                if (paneEl) {
+                    const content = paneEl.querySelector('strong')?.parentElement?.textContent;
+                    if (content) {
+                        paneName = content.replace(/^#\d+\s*/, '').trim();
+                    }
+                }
+                showToast(status, `[${source}] ${paneName}`, reason);
+            }
+            previousStatuses[pane_id] = status;
+
+            // 重新渲染以更新 UI
+            render();
         }
 
         // 更新 session 追踪器

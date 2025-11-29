@@ -1,6 +1,7 @@
 """Web 服务器"""
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse
@@ -11,6 +12,9 @@ from termsupervisor.iterm import ITerm2Client
 from termsupervisor.supervisor import TermSupervisor
 from termsupervisor.web.handlers import MessageHandler
 
+if TYPE_CHECKING:
+    from termsupervisor.hooks import HookReceiver
+
 
 class WebServer:
     """WebSocket 服务器"""
@@ -20,6 +24,7 @@ class WebServer:
         self.supervisor = supervisor
         self.iterm_client = iterm_client
         self.clients: list[WebSocket] = []
+        self._hook_receiver: "HookReceiver | None" = None
 
         templates_dir = Path(__file__).parent.parent / "templates"
         self.templates = Jinja2Templates(directory=str(templates_dir))
@@ -32,6 +37,11 @@ class WebServer:
 
         self._setup_routes()
         supervisor.on_update(self._on_layout_update)
+
+    def setup_hook_receiver(self, receiver: "HookReceiver") -> None:
+        """设置 Hook 接收器"""
+        self._hook_receiver = receiver
+        receiver.setup_routes(self.app)
 
     async def _on_layout_update(self, layout: LayoutData):
         """布局更新回调"""

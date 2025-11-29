@@ -1,0 +1,55 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "(pgrep -f termsupervisor >/dev/null && curl -s --max-time 2 -X POST http://localhost:8765/api/hook -H 'Content-Type: application/json' -d '{\"source\":\"claude-code\",\"event\":\"stop\",\"pane_id\":\"'\"$ITERM_SESSION_ID\"'\"}' &) || true"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "(pgrep -f termsupervisor >/dev/null && curl -s --max-time 2 -X POST http://localhost:8765/api/hook -H 'Content-Type: application/json' -d '{\"source\":\"claude-code\",\"event\":\"permission_prompt\",\"pane_id\":\"'\"$ITERM_SESSION_ID\"'\"}' &) || true"
+          }
+        ]
+      },
+      {
+        "matcher": "idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "(pgrep -f termsupervisor >/dev/null && curl -s --max-time 2 -X POST http://localhost:8765/api/hook -H 'Content-Type: application/json' -d '{\"source\":\"claude-code\",\"event\":\"idle_prompt\",\"pane_id\":\"'\"$ITERM_SESSION_ID\"'\"}' &) || true"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "(pgrep -f termsupervisor >/dev/null && curl -s --max-time 2 -X POST http://localhost:8765/api/hook -H 'Content-Type: application/json' -d '{\"source\":\"claude-code\",\"event\":\"pre_tool\",\"pane_id\":\"'\"$ITERM_SESSION_ID\"'\"}' &) || true"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "(pgrep -f termsupervisor >/dev/null && curl -s --max-time 2 -X POST http://localhost:8765/api/hook -H 'Content-Type: application/json' -d '{\"source\":\"claude-code\",\"event\":\"session_start\",\"pane_id\":\"'\"$ITERM_SESSION_ID\"'\"}' &) || true"
+          }
+        ]
+      }
+    ]
+  }
+}
