@@ -10,7 +10,7 @@ import iterm2
 from termsupervisor import config
 from termsupervisor.models import LayoutData, PaneSnapshot, UpdateCallback, PaneChange, PaneHistory, PaneChangeQueue
 from termsupervisor.iterm import get_layout, normalize_session_id, session_id_match
-from termsupervisor.analysis import create_analyzer, TaskStatus
+from termsupervisor.analysis import create_analyzer, TaskStatus, get_hook_manager
 
 logger = logging.getLogger(__name__)
 
@@ -316,18 +316,27 @@ class TermSupervisor:
         """获取布局数据字典（包含状态信息）"""
         data = self.layout.to_dict()
 
-        # 添加状态信息到每个 pane
+        # 从 HookManager 获取状态信息
+        hook_manager = get_hook_manager()
         pane_statuses = {}
-        for session_id, history in self.pane_histories.items():
-            status = history.current_status
-            pane_statuses[session_id] = {
-                "status": status.value if status else "unknown",
-                "status_color": status.color if status else "gray",
-                "status_reason": history.status_reason,
-                "is_thinking": history.is_thinking,
-                "thinking_duration": round(history.get_thinking_duration(), 1),
-                "needs_notification": status.needs_notification if status else False,
-            }
+
+        # 遍历当前布局中的所有 pane
+        for window in self.layout.windows:
+            for tab in window.tabs:
+                for pane in tab.panes:
+                    session_id = pane.session_id
+                    state = hook_manager.get_state(session_id)
+                    status = state.status
+
+                    pane_statuses[session_id] = {
+                        "status": status.value,
+                        "status_color": status.color,
+                        "status_reason": state.description,
+                        "is_running": status.is_running,
+                        "needs_notification": status.needs_notification,
+                        "needs_attention": status.needs_attention,
+                        "display": status.display,
+                    }
 
         data["pane_statuses"] = pane_statuses
         return data

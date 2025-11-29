@@ -6,6 +6,7 @@ import logging
 from typing import Callable, Awaitable
 
 from ..analysis.base import TaskStatus
+from ..iterm.utils import normalize_session_id
 from .state import PaneState
 
 logger = logging.getLogger(__name__)
@@ -29,40 +30,42 @@ class StateStore:
         """获取状态，默认返回 IDLE
 
         Args:
-            pane_id: pane 标识
+            pane_id: pane 标识（支持带前缀或纯 UUID 格式）
 
         Returns:
             PaneState 实例
         """
-        if pane_id not in self._states:
-            self._states[pane_id] = PaneState.idle()
-        return self._states[pane_id]
+        normalized_id = normalize_session_id(pane_id)
+        if normalized_id not in self._states:
+            self._states[normalized_id] = PaneState.idle()
+        return self._states[normalized_id]
 
     async def set(self, pane_id: str, state: PaneState) -> bool:
         """设置状态
 
         Args:
-            pane_id: pane 标识
+            pane_id: pane 标识（支持带前缀或纯 UUID 格式）
             state: 新状态
 
         Returns:
             是否有变化
         """
-        old = self._states.get(pane_id)
+        normalized_id = normalize_session_id(pane_id)
+        old = self._states.get(normalized_id)
 
         # 检查是否有实际变化
         if old and old.status == state.status and old.description == state.description:
             return False
 
-        self._states[pane_id] = state
+        self._states[normalized_id] = state
 
         # 记录日志
         old_status = old.status.value if old else "none"
         logger.info(
-            f"[StateStore] {pane_id[:8]} | {old_status} → {state.status.value} | {state.description}"
+            f"[StateStore] {normalized_id[:8]} | {old_status} → {state.status.value} | {state.description}"
         )
 
-        # 触发回调
+        # 触发回调（保持原始 pane_id，以便 WebSocket 广播使用）
         if self._on_change:
             await self._on_change(pane_id, state)
 
@@ -96,9 +99,10 @@ class StateStore:
         """清除 pane 状态
 
         Args:
-            pane_id: pane 标识
+            pane_id: pane 标识（支持带前缀或纯 UUID 格式）
         """
-        self._states.pop(pane_id, None)
+        normalized_id = normalize_session_id(pane_id)
+        self._states.pop(normalized_id, None)
 
     def clear_all(self) -> None:
         """清除所有状态"""
@@ -108,23 +112,23 @@ class StateStore:
         """获取 pane 的状态（便捷方法）
 
         Args:
-            pane_id: pane 标识
+            pane_id: pane 标识（支持带前缀或纯 UUID 格式）
 
         Returns:
             TaskStatus 枚举
         """
-        return self.get(pane_id).status
+        return self.get(pane_id).status  # get() 已处理规范化
 
     def get_description(self, pane_id: str) -> str:
         """获取 pane 的状态描述（便捷方法）
 
         Args:
-            pane_id: pane 标识
+            pane_id: pane 标识（支持带前缀或纯 UUID 格式）
 
         Returns:
             描述字符串
         """
-        return self.get(pane_id).description
+        return self.get(pane_id).description  # get() 已处理规范化
 
     def print_all_states(self) -> None:
         """打印所有状态（调试用）"""
@@ -139,9 +143,10 @@ class StateStore:
         """打印 pane 的状态历史（调试用）
 
         Args:
-            pane_id: pane 标识
+            pane_id: pane 标识（支持带前缀或纯 UUID 格式）
         """
-        state = self._states.get(pane_id)
+        normalized_id = normalize_session_id(pane_id)
+        state = self._states.get(normalized_id)
         if not state:
             print(f"[StateStore] No state for {pane_id[:8]}")
             return
