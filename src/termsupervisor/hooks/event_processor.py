@@ -1,14 +1,35 @@
-"""事件处理器 - 连接 HookEvent 和 StateMachine"""
+"""事件处理器 - 连接 HookEvent 和 StateMachine
 
+层级职责：
+- HookEvent: 统一事件格式
+- EventProcessor: 事件处理流程（调用状态机、更新存储、触发定时器）
+- AutoClearTimer: DONE/FAILED 状态的延迟清除逻辑
+"""
+
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Callable, TYPE_CHECKING
 
+from ..analysis.base import TaskStatus
+from ..config import DONE_FAILED_AUTO_CLEAR_SECONDS
 from .state import PaneState
 from .state_machine import StateMachine
 from .state_store import StateStore
 
+if TYPE_CHECKING:
+    from .event_processor import EventProcessor
+
 logger = logging.getLogger(__name__)
+
+# Focus 检查函数类型: (pane_id) -> bool
+FocusChecker = Callable[[str], bool]
+
+
+# =============================================================================
+# HookEvent - 统一事件格式
+# =============================================================================
 
 
 @dataclass
@@ -42,6 +63,102 @@ class HookEvent:
         return f"[HookEvent] {ts} | {self.source:12} | {pane_short:8} | {self.event_type}"
 
 
+# =============================================================================
+# AutoClearTimer - DONE/FAILED 状态延迟清除
+# =============================================================================
+
+
+class AutoClearTimer:
+    """DONE/FAILED 状态的延迟清除定时器
+
+    设计目的：
+    - 用户看到 DONE/FAILED 状态后，等待一段时间再清除
+    - 如果中间状态变化了，不会误清除
+
+    触发场景：
+    1. 状态变为 DONE/FAILED 且 pane 被 focus
+    2. focus 事件到达时状态已是 DONE/FAILED
+
+    安全机制：
+    - 使用 state_id（自增）判断是否同一状态实例
+    - 避免 DONE→RUNNING→DONE 误清除
+    """
+
+    def __init__(self, state_store: StateStore):
+        self._state_store = state_store
+        self._focus_checker: FocusChecker | None = None
+        self._tasks: dict[str, asyncio.Task] = {}  # {pane_id: Task}
+
+    def set_focus_checker(self, checker: FocusChecker) -> None:
+        """设置 focus 检查函数"""
+        self._focus_checker = checker
+
+    async def on_state_changed(self, pane_id: str, state: PaneState) -> None:
+        """状态变化时调用
+
+        - DONE/FAILED + focus → 启动定时器
+        - 其他状态 → 取消定时器
+        """
+        if state.status in (TaskStatus.DONE, TaskStatus.FAILED):
+            is_focused = self._focus_checker(pane_id) if self._focus_checker else False
+            if is_focused:
+                self._start_timer(pane_id, state.state_id)
+        else:
+            self._cancel_timer(pane_id)
+
+    async def on_focus_event(self, pane_id: str, state: PaneState) -> None:
+        """focus 事件到达时调用（状态机未转换的情况）
+
+        如果当前是 DONE/FAILED，启动延迟清除。
+        """
+        if state.status in (TaskStatus.DONE, TaskStatus.FAILED):
+            self._start_timer(pane_id, state.state_id)
+
+    def _start_timer(self, pane_id: str, state_id: int) -> None:
+        """启动延迟清除定时器"""
+        self._cancel_timer(pane_id)
+        self._tasks[pane_id] = asyncio.create_task(
+            self._clear_after_delay(pane_id, state_id)
+        )
+        logger.debug(f"[AutoClear] 启动: {pane_id[:8]}, state_id={state_id}")
+
+    def _cancel_timer(self, pane_id: str) -> None:
+        """取消定时器"""
+        task = self._tasks.pop(pane_id, None)
+        if task and not task.done():
+            task.cancel()
+            logger.debug(f"[AutoClear] 取消: {pane_id[:8]}")
+
+    async def _clear_after_delay(self, pane_id: str, original_state_id: int) -> None:
+        """延迟后清除状态"""
+        try:
+            await asyncio.sleep(DONE_FAILED_AUTO_CLEAR_SECONDS)
+            self._tasks.pop(pane_id, None)
+
+            # 检查 state_id 是否变化
+            current = self._state_store.get(pane_id)
+            if current.state_id > original_state_id:
+                logger.debug(
+                    f"[AutoClear] 跳过: {pane_id[:8]} "
+                    f"state_id 变化 ({original_state_id} → {current.state_id})"
+                )
+                return
+
+            # 清除为 IDLE
+            logger.info(f"[AutoClear] 清除 {current.status.value}: {pane_id[:8]}")
+            idle_state = PaneState.idle()
+            idle_state.add_history("auto_clear.timer", success=True)
+            await self._state_store.set(pane_id, idle_state)
+
+        except asyncio.CancelledError:
+            pass
+
+
+# =============================================================================
+# EventProcessor - 事件处理流程
+# =============================================================================
+
+
 class EventProcessor:
     """事件处理器 - 连接 HookEvent 和 StateMachine
 
@@ -50,43 +167,56 @@ class EventProcessor:
     2. 调用 StateMachine 计算状态转换
     3. 更新 StateStore
     4. 记录状态历史
+    5. 委托 AutoClearTimer 处理延迟清除
     """
 
     def __init__(self, state_store: StateStore, state_machine: StateMachine):
         self.state_store = state_store
         self.state_machine = state_machine
+        self._auto_clear = AutoClearTimer(state_store)
+
+    def set_focus_checker(self, checker: FocusChecker) -> None:
+        """设置 focus 检查函数"""
+        self._auto_clear.set_focus_checker(checker)
 
     async def process(self, event: HookEvent) -> bool:
         """处理事件
 
-        Args:
-            event: Hook 事件
-
-        Returns:
-            是否有状态变化
+        流程：
+        1. 调用状态机计算转换
+        2. 更新状态存储
+        3. 通知 AutoClearTimer
         """
         pane_id = event.pane_id
         signal = event.signal
 
-        # 记录事件日志（直接 print 确保可见）
         print(event.format_log())
 
-        # 获取当前状态
         current = self.state_store.get(pane_id)
-
-        # 状态机转换
         new_state = self.state_machine.transition(current, signal, event.raw_data)
 
-        # 更新状态
         if new_state:
-            # 成功转换，记录历史
+            # 状态转换成功
             new_state.add_history(signal, success=True)
-            return await self.state_store.set(pane_id, new_state)
+            changed = await self.state_store.set(pane_id, new_state)
+            if changed:
+                await self._auto_clear.on_state_changed(pane_id, new_state)
+            return changed
         else:
-            # 无匹配转换，记录到当前状态的历史
+            # 状态机未转换
             current.add_history(signal, success=False)
-            logger.debug(f"[EventProcessor] No transition for {signal} in state {current.status.value}")
+
+            # focus 事件特殊处理：触发延迟清除
+            if self._is_focus_event(signal):
+                await self._auto_clear.on_focus_event(pane_id, current)
+
+            logger.debug(f"[EventProcessor] No transition: {signal} in {current.status.value}")
             return False
+
+    def _is_focus_event(self, signal: str) -> bool:
+        """判断是否为 focus 事件"""
+        source = signal.split(".", 1)[0] if "." in signal else signal
+        return source in ("iterm", "frontend")
 
     async def process_shell_command_start(self, pane_id: str, command: str) -> bool:
         """处理 shell 命令开始事件（便捷方法）"""

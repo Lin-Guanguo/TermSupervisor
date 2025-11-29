@@ -1,10 +1,19 @@
 """状态数据结构定义"""
 
+import itertools
 from dataclasses import dataclass, field
 from datetime import datetime
 
 from ..analysis.base import TaskStatus
 from ..config import STATE_HISTORY_MAX_LENGTH, NOTIFICATION_MIN_DURATION_SECONDS
+
+# 全局自增计数器，用于生成状态 ID
+_state_id_counter = itertools.count(1)
+
+
+def _next_state_id() -> int:
+    """获取下一个状态 ID（自增）"""
+    return next(_state_id_counter)
 
 
 @dataclass
@@ -38,6 +47,8 @@ class PaneState:
         started_at: RUNNING 开始时间，用于计算 LONG_RUNNING
         history: 状态变化历史队列
         raw_data: 触发此状态的原始事件数据（用于通知抑制判断）
+        state_id: 状态唯一标识，每次状态变化生成新 ID
+                  用于自动清除定时器判断是否同一个状态实例
     """
     status: TaskStatus
     source: str
@@ -46,6 +57,7 @@ class PaneState:
     started_at: datetime | None = None
     history: list[StateHistoryEntry] = field(default_factory=list)
     raw_data: dict = field(default_factory=dict)
+    state_id: int = field(default_factory=_next_state_id)
 
     def add_history(self, signal: str, success: bool = True) -> None:
         """添加历史记录

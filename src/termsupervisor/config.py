@@ -58,6 +58,10 @@ FOCUS_DEBOUNCE_SECONDS = 2.0              # iTerm2 focus 防抖时间
 # 2. 或者用户正 focus 在该 pane
 NOTIFICATION_MIN_DURATION_SECONDS = 3.0  # 短任务阈值（秒）
 
+# === 自动清除配置 ===
+# 用户 focus 的 pane 如果是 DONE/FAILED 状态，等待此时间后自动清除
+DONE_FAILED_AUTO_CLEAR_SECONDS = 5.0
+
 # === Source 优先级 ===
 # 数字越大优先级越高，高优先级 source 可以覆盖低优先级状态
 SOURCE_PRIORITY = {

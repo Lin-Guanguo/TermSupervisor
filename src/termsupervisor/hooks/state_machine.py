@@ -273,9 +273,14 @@ class StateMachine:
         event: str,
         data: dict
     ) -> PaneState | None:
-        """处理用户操作"""
-        # 只清除"待确认"状态
-        if current.status in (TaskStatus.DONE, TaskStatus.FAILED, TaskStatus.WAITING_APPROVAL):
+        """处理用户操作
+
+        DONE/FAILED 状态不在这里清除，由 EventProcessor 的延迟清除机制处理。
+        这样用户可以先看到状态，过一会再消除，体验更好。
+
+        只有 WAITING_APPROVAL 立即清除（权限确认需要快速响应）。
+        """
+        if current.status == TaskStatus.WAITING_APPROVAL:
             return PaneState(
                 status=TaskStatus.IDLE,
                 source="user",
@@ -283,6 +288,7 @@ class StateMachine:
                 history=current.history,
             )
 
+        # DONE/FAILED 不在这里清除，交给 EventProcessor 延迟处理
         return None
 
     def _parse_signal(self, signal: str) -> tuple[str, str]:

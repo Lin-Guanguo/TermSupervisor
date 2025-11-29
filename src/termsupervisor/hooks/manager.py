@@ -67,6 +67,7 @@ class HookManager:
             checker: 函数 (pane_id) -> bool，返回该 pane 是否正被 focus
         """
         self._state_store.set_focus_checker(checker)
+        self._event_processor.set_focus_checker(checker)
 
     # ==================== 事件处理 API ====================
 
