@@ -4,59 +4,102 @@ Monitor iTerm2 pane content changes with a real-time web dashboard.
 
 ## Features
 
-- **Real-time Web Dashboard**: Visualizes your entire iTerm2 environment with SVG terminal rendering.
-- **Unified Layout**: Displays all Windows and Tabs in a responsive grid (configurable 1-6 tabs per row).
-- **Accurate Pane Mirroring**: Panes rendered with relative positioning and aspect ratios matching the actual terminal layout.
-- **Content Change Detection**: Periodically scans all panes for content changes using diffs.
-- **Status Analysis**: Hook-based (recommended), rule-based, or LLM-based analysis detects task states (idle, running, thinking, waiting approval, completed, failed, interrupted).
-- **Visual Notifications**: Bottom floating notification panel with status-based color coding.
-- **Active Pane Highlight**: Currently focused pane is visually highlighted with orange border.
-- **Interactive**: Click on any pane to activate that session in iTerm2.
-- **Right-click Menu**: Rename Windows, Tabs, and Sessions; hide/show Tabs.
-- **Tab Management**: Hide tabs to reduce clutter, restore from dropdown in window title.
-- **Configurable**: Filter panes by name, adjust scan intervals, and set change thresholds.
+- **Real-time Web Dashboard**: Visualizes your entire iTerm2 environment with SVG terminal rendering
+- **Unified Layout**: Displays all Windows and Tabs in a responsive grid (1-6 tabs per row)
+- **Content Change Detection**: 1s polling with smart throttling via PaneChangeQueue
+- **State Machine**: 6 states driven by Shell PromptMonitor + Claude Code HTTP hooks
+- **Visual Notifications**: Bottom floating notification panel with status-based colors
+- **Active Pane Highlight**: Orange border for currently focused pane
+- **Interactive**: Click to activate pane, right-click to rename/hide
 
 ## Architecture
 
 ```
-src/termsupervisor/
-├── models.py           # Data models (PaneInfo, TabInfo, WindowInfo, LayoutData, PaneHistory)
-├── config.py           # Configuration constants
-├── supervisor.py       # Monitor service (change detection, polling loop)
-├── iterm/
-│   ├── client.py       # iTerm2 API operations (activate, rename)
-│   └── layout.py       # Layout traversal (get window/tab/pane structure)
-├── web/
-│   ├── app.py          # Application startup
-│   ├── server.py       # WebSocket server
-│   └── handlers.py     # Message handlers (activate, rename)
-├── analysis/
-│   ├── base.py         # StatusAnalyzer base class, TaskStatus enum
-│   ├── cleaner.py      # ChangeCleaner (debounce, similarity filtering)
-│   ├── hook.py         # Hook-based status analyzer (recommended)
-│   ├── llm.py          # LLM-based status analyzer
-│   └── rule_based.py   # Rule-based status analyzer
-├── hooks/
-│   ├── manager.py      # HookManager (multi-layer status management)
-│   ├── receiver.py     # HTTP API receiver (/api/hook)
-│   ├── prompt_monitor.py  # iTerm2 PromptMonitor wrapper
-│   └── sources/        # Hook sources (shell, claude_code)
-└── templates/
-    └── index.html      # Frontend dashboard
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Signal Sources                               │
+├─────────────┬─────────────┬─────────────┬─────────────┬─────────────┤
+│    Shell    │ Claude Code │   Render    │    iTerm    │  Frontend   │
+│PromptMonitor│  HTTP Hook  │ PaneQueue   │FocusMonitor │  WebSocket  │
+└──────┬──────┴──────┬──────┴──────┬──────┴──────┬──────┴──────┬──────┘
+       │             │             │             │             │
+       └─────────────┴─────────────┴─────────────┴─────────────┘
+                                   │
+                                   ▼
+                        ┌─────────────────────┐
+                        │     HookEvent       │
+                        │  source.event_type  │
+                        └──────────┬──────────┘
+                                   │
+                                   ▼
+                        ┌─────────────────────┐
+                        │   EventProcessor    │
+                        │   + StateMachine    │
+                        └──────────┬──────────┘
+                                   │
+                                   ▼
+                        ┌─────────────────────┐
+                        │     StateStore      │
+                        │  + WebSocket Broadcast
+                        └─────────────────────┘
 ```
 
+### State Machine
+
+6 states with source priority (claude-code:10 > shell:1 > timer:0):
+
+| State | Trigger Events | Color | Visual Effect |
+|-------|---------------|-------|---------------|
+| IDLE | `idle_prompt`, `SessionEnd`, focus/click | - | Hidden |
+| RUNNING | `command_start`, `PreToolUse`, `SessionStart` | Blue | Rotating border |
+| LONG_RUNNING | RUNNING > 60s | Dark blue | Rotating border |
+| WAITING_APPROVAL | `Notification:permission_prompt` | Yellow | Blinking |
+| DONE | `command_end`(exit=0), `Stop` | Green | Blinking |
+| FAILED | `command_end`(exit≠0) | Red | Blinking |
+
+### Content Change Detection
+
 ```
-┌─────────────────┐     callback      ┌─────────────────┐
-│  TermSupervisor │ ───────────────▶  │    WebServer    │
-│   (supervisor)  │                   │  (FastAPI+WS)   │
-└────────┬────────┘                   └────────┬────────┘
-         │                                     │
-         │ iTerm2 API                          │ WebSocket
-         ▼                                     ▼
-┌─────────────────┐                   ┌─────────────────┐
-│     iTerm2      │                   │     Browser     │
-│  (pane content) │                   │   (dashboard)   │
-└─────────────────┘                   └─────────────────┘
+1s Polling → ContentCleaner → PaneChangeQueue → SVG Refresh
+                  │                  │
+                  │                  ├── Refresh: ≥5 lines changed or 10s timeout
+                  │                  └── Queue push: ≥20 lines changed
+                  │
+                  └── Unicode whitelist: letters, digits, CJK only
+                      (filters ANSI, spinners, progress bars, punctuation)
+```
+
+## Project Structure
+
+```
+src/termsupervisor/
+├── models.py           # PaneInfo, ChangeRecord, PaneChangeQueue
+├── config.py           # All configuration constants
+├── supervisor.py       # 1s polling loop with PaneChangeQueue
+├── iterm/
+│   ├── client.py       # iTerm2 API (activate, rename)
+│   └── layout.py       # Layout traversal
+├── web/
+│   ├── app.py          # FastAPI startup, Hook system init
+│   ├── server.py       # WebSocket server
+│   └── handlers.py     # activate, rename, click handlers
+├── analysis/
+│   ├── base.py         # TaskStatus enum (6 states)
+│   ├── content_cleaner.py  # Unicode whitelist filter
+│   └── cleaner.py      # ChangeCleaner (debounce)
+├── hooks/
+│   ├── manager.py      # HookManager facade
+│   ├── event_processor.py  # HookEvent → StateMachine
+│   ├── state_machine.py    # Transition rules
+│   ├── state_store.py      # State persistence + callbacks
+│   ├── state.py            # PaneState, StateHistoryEntry
+│   ├── receiver.py     # HTTP /api/hook endpoint
+│   ├── prompt_monitor.py   # iTerm2 PromptMonitor wrapper
+│   └── sources/
+│       ├── shell.py        # command_start, command_end
+│       ├── claude_code.py  # PreToolUse, Stop, etc.
+│       └── iterm.py        # focus (2s debounce)
+└── templates/
+    └── index.html      # Frontend (vanilla JS)
 ```
 
 ## Install
@@ -68,96 +111,83 @@ uv sync
 ## Usage
 
 **Prerequisite:** Enable Python API in iTerm2
-- iTerm2 -> Settings -> General -> Magic -> Enable Python API
+- iTerm2 → Settings → General → Magic → Enable Python API
 
-### Web Dashboard (Recommended)
-
-```bash
-# Background mode
-make run
-
-# View logs
-make viewlog
-
-# Stop server
-make stop
-
-# Restart
-make rerun
-```
-
-Then open http://localhost:8765
-
-### CLI Monitor
+### Web Dashboard
 
 ```bash
-uv run termsupervisor
+make run          # Start in background
+make stop         # Stop server
+make rerun        # Restart
+
+make viewlog      # View full log
+make taillog      # Follow log
+make loghook      # Monitor hook events only
+make logerr       # Monitor errors only
 ```
 
-## Makefile Commands
-
-| Command | Description |
-|---------|-------------|
-| `make run` | Start web server in background |
-| `make stop` | Stop background server |
-| `make rerun` | Restart server (stop + run) |
-| `make viewlog` | View complete log file |
-| `make taillog` | Follow log in real-time |
-| `make run-web` | Run web server in foreground |
-| `make run-cli` | Run CLI monitor |
-| `make test` | Run tests |
-| `make clean` | Clean logs and cache |
+Open http://localhost:8765
 
 ## Configuration
 
 Edit `src/termsupervisor/config.py`:
 
 ```python
-# Monitor settings
-INTERVAL = 3.0                     # Monitor interval (seconds)
-LONG_RUNNING_THRESHOLD = 15.0      # Long-running task threshold (seconds)
-EXCLUDE_NAMES = ["supervisor"]     # Excluded pane names (substring match)
-MIN_CHANGED_LINES = 5              # Minimum changed lines to trigger notification
-DEBUG = True                       # Debug mode (print change details)
-USER_NAME_VAR = "user.name"        # Variable name for custom names
+# === Polling ===
+POLL_INTERVAL = 1.0                    # seconds
 
-# Status analysis settings
-ANALYZER_TYPE = "hook"             # "hook" (recommended) | "llm" | "rule"
-LLM_MODEL = "google/gemini-2.0-flash"
-LLM_TIMEOUT = 15.0
+# === PaneChangeQueue ===
+QUEUE_REFRESH_LINES = 5                # SVG refresh threshold
+QUEUE_NEW_RECORD_LINES = 20            # Queue push threshold
+QUEUE_FLUSH_TIMEOUT = 10.0             # Fallback refresh (seconds)
+QUEUE_MAX_SIZE = 20
+
+# === State Machine ===
+LONG_RUNNING_THRESHOLD_SECONDS = 60.0  # RUNNING → LONG_RUNNING
+STATE_HISTORY_MAX_LENGTH = 30          # History entries per pane
+
+# === Focus ===
+FOCUS_DEBOUNCE_SECONDS = 2.0           # iTerm focus debounce
+
+# === Source Priority ===
+SOURCE_PRIORITY = {
+    "claude-code": 10,
+    "gemini": 10,
+    "codex": 10,
+    "shell": 1,
+    "render": 1,
+    "timer": 0,
+}
 ```
 
-### Hook-based Status Analysis (Recommended)
+## Claude Code Integration
 
-The hook analyzer receives status updates from external tools via HTTP API. To integrate with Claude Code:
+1. Copy `hooks/claude-code/settings.json` to Claude Code hooks directory
+2. Events sent to `POST /api/hook`:
+   - `SessionStart`, `SessionEnd`
+   - `PreToolUse`, `PostToolUse`, `SubagentStop`
+   - `Stop` (task complete)
+   - `Notification:permission_prompt`, `Notification:idle_prompt`
 
-1. Copy `hooks/claude-code/settings.json` to your Claude Code hooks directory
-2. The hook will send status updates to `http://localhost:8765/api/hook` on events like:
-   - Tool execution start/stop
-   - User prompt submissions
-   - Task completions
+See `hooks/claude-code/README.md` for details.
 
-See `hooks/claude-code/README.md` for setup details.
+## Makefile Commands
 
-## Web Dashboard Features
-
-- **Window Groups**: Windows act as containers for their tabs.
-- **Tiled Tab View**: Tabs tiled horizontally (configurable 1-6 per row) for a "bird's-eye view".
-- **SVG Terminal Rendering**: Panes display actual terminal content as SVG images.
-- **Right-click Menu**: Rename Windows, Tabs, or Sessions; hide Tabs.
-- **Tab Hide/Show**: Hide tabs via right-click menu, restore from dropdown button in window title.
-- **Click to Activate**: Click any pane to switch to that iTerm2 session.
-- **Notification Panel**: Bottom floating panel shows status changes (click to focus pane, delete individual notifications).
-- **Visual Updates**: Panes flash green on content changes, status-based color coding (purple=thinking, yellow=waiting approval, green=completed, red=failed).
-- **Auto-reconnect**: WebSocket reconnects automatically if the server restarts.
-- **Persistent Settings**: Tab visibility, tabs per row, and panel state saved to localStorage.
+| Command | Description |
+|---------|-------------|
+| `make run` | Start in background |
+| `make stop` | Stop server |
+| `make rerun` | Restart (stop + run) |
+| `make viewlog` | View full log |
+| `make taillog` | Follow log |
+| `make loghook` | Monitor hook events |
+| `make logerr` | Monitor errors |
+| `make test` | Run pytest |
+| `make clean` | Clean logs and cache |
 
 ## Development
 
 ```bash
-# Run tests
-uv run pytest
-
-# Or via make
-make test
+make test         # Run tests
+make loghook      # Monitor events while developing
 ```
