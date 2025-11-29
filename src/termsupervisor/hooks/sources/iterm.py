@@ -40,6 +40,14 @@ class ItermHookSource(HookSource):
         self._last_focus_session: str | None = None
         self._debounce_task: asyncio.Task | None = None
 
+        # 当前 focus 的 session（已通过防抖确认）
+        self._current_focus_session: str | None = None
+
+    @property
+    def current_focus_session(self) -> str | None:
+        """获取当前 focus 的 session_id（用于通知抑制判断）"""
+        return self._current_focus_session
+
     async def start(self) -> None:
         """启动 Focus 监听"""
         self._focus_task = asyncio.create_task(self._monitor_focus())
@@ -119,6 +127,8 @@ class ItermHookSource(HookSource):
 
             # 确认仍然 focus 在同一个 session
             if self._last_focus_session == session_id:
+                # 更新当前 focus（用于通知抑制判断）
+                self._current_focus_session = session_id
                 logger.debug(f"[ItermHook] 发送 focus 事件: {session_id}")
                 await self.manager.process_user_focus(session_id)
 

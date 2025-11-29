@@ -8,6 +8,7 @@ import uvicorn
 
 from termsupervisor import config
 from termsupervisor.iterm import ITerm2Client
+from termsupervisor.iterm.utils import normalize_session_id
 from termsupervisor.supervisor import TermSupervisor
 from termsupervisor.web.server import WebServer
 
@@ -38,11 +39,15 @@ async def setup_hook_system(
     hook_manager = get_hook_manager()
 
     # 设置状态变更回调 -> 广播到前端
-    async def on_status_change(pane_id: str, status, reason: str, source: str):
+    async def on_status_change(pane_id: str, status, reason: str, source: str, suppressed: bool):
         """状态变更时广播到前端"""
         # 获取 pane 所在的 window/tab 名称
         window_name, tab_name, pane_name = server.supervisor.get_pane_location(pane_id)
         print(f"[HookStatus] pane_id={pane_id}, window={window_name}, tab={tab_name}, pane={pane_name}")
+
+        # 通知抑制由 StateStore 统一处理，这里直接使用结果
+        needs_notification = status.needs_notification and not suppressed
+
         await server.broadcast({
             "type": "hook_status",
             "pane_id": pane_id,
@@ -50,7 +55,7 @@ async def setup_hook_system(
             "status_color": status.color,
             "reason": reason,
             "source": source,
-            "needs_notification": status.needs_notification,
+            "needs_notification": needs_notification,
             "needs_attention": status.needs_attention,
             "is_running": status.is_running,
             "display": status.display,
@@ -65,6 +70,17 @@ async def setup_hook_system(
     shell_source = ShellHookSource(hook_manager, connection)
     claude_code_source = ClaudeCodeHookSource(hook_manager)
     iterm_source = ItermHookSource(hook_manager, connection)
+
+    # 设置 focus 检查函数（用于通知抑制判断）
+    def check_is_focused(pane_id: str) -> bool:
+        focus_session = iterm_source.current_focus_session
+        if not focus_session:
+            return False
+        normalized_pane = normalize_session_id(pane_id)
+        normalized_focus = normalize_session_id(focus_session)
+        return normalized_pane == normalized_focus
+
+    hook_manager.set_focus_checker(check_is_focused)
 
     # 创建接收器并注册适配器
     receiver = HookReceiver(hook_manager)

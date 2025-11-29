@@ -11,8 +11,11 @@ from .state import PaneState
 
 logger = logging.getLogger(__name__)
 
-# 状态变更回调类型: (pane_id, new_state) -> None
-StateChangeCallback = Callable[[str, PaneState], Awaitable[None]]
+# 状态变更回调类型: (pane_id, new_state, is_notification_suppressed, suppress_reason) -> None
+StateChangeCallback = Callable[[str, PaneState, bool, str], Awaitable[None]]
+
+# Focus 检查函数类型: (pane_id) -> bool
+FocusChecker = Callable[[str], bool]
 
 
 class StateStore:
@@ -25,6 +28,7 @@ class StateStore:
     def __init__(self):
         self._states: dict[str, PaneState] = {}  # {pane_id: state}
         self._on_change: StateChangeCallback | None = None
+        self._focus_checker: FocusChecker | None = None
 
     def get(self, pane_id: str) -> PaneState:
         """获取状态，默认返回 IDLE
@@ -65,9 +69,15 @@ class StateStore:
             f"[StateStore] {normalized_id[:8]} | {old_status} → {state.status.value} | {state.description}"
         )
 
+        # 计算通知抑制
+        is_focused = self._focus_checker(pane_id) if self._focus_checker else False
+        suppressed, suppress_reason = state.should_suppress_notification(is_focused)
+        if suppressed:
+            print(f"[HookStatus] Notification suppressed: {suppress_reason}")
+
         # 触发回调（保持原始 pane_id，以便 WebSocket 广播使用）
         if self._on_change:
-            await self._on_change(pane_id, state)
+            await self._on_change(pane_id, state, suppressed, suppress_reason)
 
         return True
 
@@ -75,9 +85,17 @@ class StateStore:
         """设置状态变更回调
 
         Args:
-            callback: 回调函数 (pane_id, new_state) -> None
+            callback: 回调函数 (pane_id, new_state, suppressed, reason) -> None
         """
         self._on_change = callback
+
+    def set_focus_checker(self, checker: FocusChecker) -> None:
+        """设置 focus 检查函数
+
+        Args:
+            checker: 函数 (pane_id) -> bool，返回该 pane 是否正被 focus
+        """
+        self._focus_checker = checker
 
     def get_all_panes(self) -> set[str]:
         """获取所有有状态的 pane_id

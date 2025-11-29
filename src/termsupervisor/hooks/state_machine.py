@@ -121,6 +121,7 @@ class StateMachine:
                     status=TaskStatus.DONE,
                     source="shell",
                     description="命令完成",
+                    started_at=current.started_at,  # 保留用于计算运行时长
                     history=current.history,
                 )
             else:
@@ -128,6 +129,7 @@ class StateMachine:
                     status=TaskStatus.FAILED,
                     source="shell",
                     description=f"命令失败 (exit={exit_code})",
+                    started_at=current.started_at,  # 保留用于计算运行时长
                     history=current.history,
                 )
 
@@ -188,6 +190,7 @@ class StateMachine:
                 status=TaskStatus.DONE,
                 source="claude-code",
                 description="Claude 已完成回复",
+                started_at=current.started_at,  # 保留用于计算运行时长
                 history=current.history,
             )
 

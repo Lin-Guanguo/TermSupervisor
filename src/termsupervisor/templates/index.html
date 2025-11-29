@@ -1065,9 +1065,6 @@
         // 需要显示蓝色的 session（长时间任务已完成）
         let longRunningCompleted = new Set();
 
-        // 已确认的状态（用户已看到，不再高亮）
-        let acknowledgedSessions = new Set();
-
         // 隐藏的 tabs（按 window_id 分组）
         // { window_id: Set(tab_id, ...) }
         let hiddenTabs = {};
@@ -1305,10 +1302,6 @@
         function updateSessionTracker(updatedSessions, activeSessionId) {
             const now = Date.now();
 
-            // 注意：不再自动确认 active session
-            // 通知应该先显示，用户点击 pane 或关闭通知后才确认
-            // acknowledgeSession 只在用户主动操作时调用
-
             // 更新有更新的 session
             updatedSessions.forEach(sessionId => {
                 // 如果之前是蓝色状态，现在又有更新了，清除蓝色状态
@@ -1352,21 +1345,6 @@
         // 判断 session 是否是已完成的长时间任务（显示蓝色）
         function isLongRunningCompleted(sessionId) {
             return longRunningCompleted.has(sessionId);
-        }
-
-        // 清除 session 的长时间运行状态（当用户点击激活时）
-        function clearLongRunning(sessionId) {
-            longRunningCompleted.delete(sessionId);
-            delete sessionUpdateTracker[sessionId];
-        }
-
-        // 确认 session 状态（用户已看到）
-        function acknowledgeSession(sessionId) {
-            // 规范化 sessionId，确保格式一致
-            const normalizedId = normalizeSessionId(sessionId);
-            acknowledgedSessions.add(normalizedId);
-            // 同时清除长时间运行状态
-            clearLongRunning(normalizedId);
         }
 
         // 是否正在 hover 下拉菜单
@@ -1596,9 +1574,8 @@
             paneEl.title = `[${paneData.index}] ${paneData.session_id}\n${debugInfo}`;
 
             paneEl.onclick = () => {
-                acknowledgeSession(paneData.session_id);
+                // 发送激活请求，后端会处理状态清除
                 ws.send('activate:' + paneData.session_id);
-                render(); // 立即更新 UI
             };
             paneEl.oncontextmenu = (e) => showContextMenu(e, 'session', paneData.session_id, paneData.name);
 
@@ -1721,9 +1698,6 @@
             const shouldDisplay = statusInfo.display !== false;  // 默认显示，除非明确为 false
             const statusReason = statusInfo.status_reason || '';
 
-            // 检查是否已确认（使用规范化的 ID）
-            const isAcknowledgedNow = acknowledgedSessions.has(normalizedId);
-
             // 更新状态指示器
             const statusEl = paneEl.querySelector('[data-status-indicator]');
             if (statusEl) {
@@ -1732,8 +1706,8 @@
                 if (statusText && shouldDisplay) {
                     statusEl.textContent = statusText;
                     statusEl.className = `pane-status status-${status}`;
-                    // 需要关注且未确认的才显示脉冲动画
-                    if (needsAttention && !isAcknowledgedNow) {
+                    // 需要关注的状态显示脉冲动画
+                    if (needsAttention) {
                         statusEl.classList.add('needs-attention');
                     }
                     statusEl.style.display = 'block';
@@ -1743,14 +1717,6 @@
                 }
             }
 
-            // 检测状态变化 - 仅用于清除已确认标记，不发送通知
-            // 通知完全由 Hook 系统驱动（handleHookStatus），轮询不触发通知
-            const prevStatus = previousStatuses[normalizedId];
-            if (prevStatus !== status && needsAttention) {
-                acknowledgedSessions.delete(normalizedId);
-            }
-            previousStatuses[normalizedId] = status;
-
             // 清除所有状态相关的样式类
             paneEl.classList.remove(
                 'status-waiting_approval', 'status-done', 'status-failed',
@@ -1759,11 +1725,7 @@
 
             // 根据状态添加样式类
             if (shouldDisplay) {
-                if (isRunning) {
-                    // 运行中状态：始终显示动画（不受确认机制影响）
-                    paneEl.classList.add(`status-${status}`);
-                } else if (needsAttention && !isAcknowledgedNow) {
-                    // 需要关注的状态：已确认的不高亮
+                if (isRunning || needsAttention) {
                     paneEl.classList.add(`status-${status}`);
                 }
             }

@@ -12,8 +12,11 @@ from .event_processor import EventProcessor, HookEvent
 logger = logging.getLogger(__name__)
 
 
-# 状态变更回调类型: (pane_id, status, description, source) -> None
-StatusChangeCallback = Callable[[str, TaskStatus, str, str], Awaitable[None]]
+# 状态变更回调类型: (pane_id, status, description, source, suppressed) -> None
+StatusChangeCallback = Callable[[str, TaskStatus, str, str, bool], Awaitable[None]]
+
+# Focus 检查函数类型: (pane_id) -> bool
+FocusChecker = Callable[[str], bool]
 
 
 class HookManager:
@@ -38,23 +41,32 @@ class HookManager:
         # 设置状态变更回调
         self._state_store.set_change_callback(self._on_state_change)
 
-    async def _on_state_change(self, pane_id: str, state: PaneState) -> None:
+    async def _on_state_change(self, pane_id: str, state: PaneState, suppressed: bool, reason: str) -> None:
         """状态变更内部回调 - 转发给外部回调"""
         if self._on_change:
             await self._on_change(
                 pane_id,
                 state.status,
                 state.description,
-                state.source
+                state.source,
+                suppressed
             )
 
     def set_change_callback(self, callback: StatusChangeCallback) -> None:
         """设置状态变更回调
 
         Args:
-            callback: 回调函数 (pane_id, status, description, source) -> None
+            callback: 回调函数 (pane_id, status, description, source, suppressed) -> None
         """
         self._on_change = callback
+
+    def set_focus_checker(self, checker: FocusChecker) -> None:
+        """设置 focus 检查函数
+
+        Args:
+            checker: 函数 (pane_id) -> bool，返回该 pane 是否正被 focus
+        """
+        self._state_store.set_focus_checker(checker)
 
     # ==================== 事件处理 API ====================
 
