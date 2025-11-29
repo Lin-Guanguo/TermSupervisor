@@ -94,10 +94,65 @@
         }
         .add-tab-wrapper {
             position: relative;
-            padding: 8px;
-            padding-left: 80px;
-            margin: -8px;
-            margin-left: -70px;
+            padding: 8px 8px 20px 8px;
+            margin: -8px -8px -20px -8px;
+        }
+        /* 隐藏 tabs 按钮 */
+        .hidden-tabs-wrapper {
+            position: relative;
+            margin-right: 12px;
+        }
+        .hidden-tabs-btn {
+            background: #30363d;
+            border: none;
+            border-radius: 4px;
+            color: #8b949e;
+            padding: 4px 8px;
+            font-size: 11px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .hidden-tabs-btn:hover {
+            background: #484f58;
+            color: #e6edf3;
+        }
+        .hidden-tabs-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            padding-top: 4px;
+            display: none;
+            z-index: 100;
+        }
+        .hidden-tabs-wrapper:hover .hidden-tabs-dropdown {
+            display: block;
+        }
+        .hidden-tabs-dropdown-inner {
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 4px 0;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+            min-width: 150px;
+        }
+        .hidden-tab-item {
+            padding: 8px 12px;
+            cursor: pointer;
+            font-size: 13px;
+            color: #e6edf3;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .hidden-tab-item:hover {
+            background: #30363d;
+        }
+        .hidden-tab-item .show-btn {
+            font-size: 11px;
+            color: #58a6ff;
         }
         .add-tab-btn {
             background: #238636;
@@ -197,8 +252,11 @@
             transition: all 0.2s ease;
             color: #c9d1d9;
             z-index: 1;
+            user-select: none;
+            -webkit-user-select: none;
         }
         .pane-svg-container {
+            position: relative;
             width: 100%;
             height: 100%;
             overflow: hidden;
@@ -544,6 +602,7 @@
         <div class="config-box">
             <label for="tabsPerRow">Tabs per row:</label>
             <select id="tabsPerRow">
+                <option value="1">1</option>
                 <option value="2">2</option>
                 <option value="3">3</option>
                 <option value="4" selected>4</option>
@@ -558,6 +617,7 @@
     <!-- 右键菜单 -->
     <div class="context-menu" id="contextMenu">
         <div class="context-menu-item" id="menuRename">Rename</div>
+        <div class="context-menu-item" id="menuHideTab" style="display: none;">Hide Tab</div>
     </div>
 
     <!-- Toast 通知容器 -->
@@ -646,24 +706,83 @@
         // 已确认的状态（用户已看到，不再高亮）
         let acknowledgedSessions = new Set();
 
+        // 隐藏的 tabs（按 window_id 分组）
+        // { window_id: Set(tab_id, ...) }
+        let hiddenTabs = {};
+
+        // 从 localStorage 恢复隐藏的 tabs
+        const savedHiddenTabs = localStorage.getItem('hiddenTabs');
+        if (savedHiddenTabs) {
+            try {
+                const parsed = JSON.parse(savedHiddenTabs);
+                Object.keys(parsed).forEach(windowId => {
+                    hiddenTabs[windowId] = new Set(parsed[windowId]);
+                });
+            } catch (e) {
+                console.error('Failed to parse hiddenTabs:', e);
+            }
+        }
+
+        function saveHiddenTabs() {
+            const toSave = {};
+            Object.keys(hiddenTabs).forEach(windowId => {
+                toSave[windowId] = Array.from(hiddenTabs[windowId]);
+            });
+            localStorage.setItem('hiddenTabs', JSON.stringify(toSave));
+        }
+
+        function hideTab(windowId, tabId) {
+            if (!hiddenTabs[windowId]) {
+                hiddenTabs[windowId] = new Set();
+            }
+            hiddenTabs[windowId].add(tabId);
+            saveHiddenTabs();
+            render();
+        }
+
+        function showTab(windowId, tabId) {
+            if (hiddenTabs[windowId]) {
+                hiddenTabs[windowId].delete(tabId);
+                if (hiddenTabs[windowId].size === 0) {
+                    delete hiddenTabs[windowId];
+                }
+            }
+            saveHiddenTabs();
+            render();
+        }
+
+        function isTabHidden(windowId, tabId) {
+            return hiddenTabs[windowId] && hiddenTabs[windowId].has(tabId);
+        }
+
+        function getHiddenTabsForWindow(windowId, tabs) {
+            if (!hiddenTabs[windowId]) return [];
+            return tabs.filter(tab => hiddenTabs[windowId].has(tab.tab_id));
+        }
+
         // 右键菜单状态
-        let contextTarget = null; // { type: 'window'|'tab'|'session', id: string, name: string }
+        let contextTarget = null; // { type: 'window'|'tab'|'session', id: string, name: string, windowId?: string }
 
         // 右键菜单逻辑
         const contextMenu = document.getElementById('contextMenu');
         const menuRename = document.getElementById('menuRename');
+        const menuHideTab = document.getElementById('menuHideTab');
         const modalOverlay = document.getElementById('modalOverlay');
         const modalTitle = document.getElementById('modalTitle');
         const modalInput = document.getElementById('modalInput');
         const modalCancel = document.getElementById('modalCancel');
         const modalSave = document.getElementById('modalSave');
 
-        function showContextMenu(e, type, id, name) {
+        function showContextMenu(e, type, id, name, windowId = null) {
             e.preventDefault();
             e.stopPropagation();
-            contextTarget = { type, id, name };
+            contextTarget = { type, id, name, windowId };
             contextMenu.style.left = e.clientX + 'px';
             contextMenu.style.top = e.clientY + 'px';
+
+            // 只有 tab 类型才显示 Hide Tab 选项
+            menuHideTab.style.display = type === 'tab' ? 'block' : 'none';
+
             contextMenu.classList.add('show');
         }
 
@@ -691,6 +810,13 @@
             modalInput.focus();
             modalInput.select();
             hideContextMenu();
+        });
+
+        menuHideTab.addEventListener('click', () => {
+            if (!contextTarget || contextTarget.type !== 'tab') return;
+            hideTab(contextTarget.windowId, contextTarget.id);
+            hideContextMenu();
+            contextTarget = null;
         });
 
         modalCancel.addEventListener('click', () => {
@@ -952,6 +1078,44 @@
             return addTabWrapper;
         }
 
+        function createHiddenTabsDropdown(windowId, tabs) {
+            const hiddenTabsList = getHiddenTabsForWindow(windowId, tabs);
+            if (hiddenTabsList.length === 0) return null;
+
+            const wrapper = document.createElement('div');
+            wrapper.className = 'hidden-tabs-wrapper';
+
+            const btn = document.createElement('button');
+            btn.className = 'hidden-tabs-btn';
+            btn.innerHTML = `<span>👁</span> ${hiddenTabsList.length} hidden`;
+            wrapper.appendChild(btn);
+
+            const dropdown = document.createElement('div');
+            dropdown.className = 'hidden-tabs-dropdown';
+
+            const dropdownInner = document.createElement('div');
+            dropdownInner.className = 'hidden-tabs-dropdown-inner';
+
+            hiddenTabsList.forEach(tab => {
+                const item = document.createElement('div');
+                item.className = 'hidden-tab-item';
+                item.innerHTML = `
+                    <span>${tab.name || 'Tab'}</span>
+                    <span class="show-btn">Show</span>
+                `;
+                item.onclick = (e) => {
+                    e.stopPropagation();
+                    showTab(windowId, tab.tab_id);
+                };
+                dropdownInner.appendChild(item);
+            });
+
+            dropdown.appendChild(dropdownInner);
+            wrapper.appendChild(dropdown);
+
+            return wrapper;
+        }
+
         function createWindowElement(windowData) {
             const windowEl = document.createElement('div');
             windowEl.className = 'window';
@@ -966,16 +1130,43 @@
             titleText.oncontextmenu = (e) => showContextMenu(e, 'window', windowData.window_id, windowData.name);
             titleEl.appendChild(titleText);
 
+            // 隐藏 tabs 按钮占位符（会在 updateWindowHiddenTabs 中更新）
+            const hiddenTabsPlaceholder = document.createElement('span');
+            hiddenTabsPlaceholder.className = 'hidden-tabs-placeholder';
+            titleEl.appendChild(hiddenTabsPlaceholder);
+
             titleEl.appendChild(createAddTabDropdown(windowData.window_id));
             windowEl.appendChild(titleEl);
 
             return windowEl;
         }
 
-        function createTabElement(tabData) {
+        function updateWindowHiddenTabs(windowEl, windowData) {
+            const titleEl = windowEl.querySelector('.window-title');
+            const placeholder = titleEl.querySelector('.hidden-tabs-placeholder');
+            const existingWrapper = titleEl.querySelector('.hidden-tabs-wrapper');
+
+            // 移除旧的
+            if (existingWrapper) {
+                existingWrapper.remove();
+            }
+
+            // 创建新的（如果有隐藏的 tabs）
+            const newWrapper = createHiddenTabsDropdown(windowData.window_id, windowData.tabs);
+            if (newWrapper && placeholder) {
+                placeholder.replaceWith(newWrapper);
+                // 重新添加占位符以便下次更新
+                const newPlaceholder = document.createElement('span');
+                newPlaceholder.className = 'hidden-tabs-placeholder';
+                newWrapper.parentNode.insertBefore(newPlaceholder, newWrapper);
+            }
+        }
+
+        function createTabElement(tabData, windowId) {
             const tabEl = document.createElement('div');
             tabEl.className = 'tab-display-wrapper';
             tabEl.dataset.tabId = tabData.tab_id;
+            tabEl.dataset.windowId = windowId;
 
             // 动态计算宽度
             const gapPx = 15;
@@ -987,7 +1178,7 @@
             const tabTitleEl = document.createElement('div');
             tabTitleEl.className = 'tab-title';
             tabTitleEl.textContent = tabData.name || 'Tab';
-            tabTitleEl.oncontextmenu = (e) => showContextMenu(e, 'tab', tabData.tab_id, tabData.name);
+            tabTitleEl.oncontextmenu = (e) => showContextMenu(e, 'tab', tabData.tab_id, tabData.name, windowId);
             tabEl.appendChild(tabTitleEl);
 
             const panesContainer = document.createElement('div');
@@ -1052,16 +1243,40 @@
             return paneEl;
         }
 
-        // 刷新指定 pane 的 SVG
+        // 刷新指定 pane 的 SVG（无闪烁）
         function refreshPaneSvg(sessionId) {
             const paneEl = document.querySelector(`[data-session-id="${sessionId}"]`);
             if (!paneEl) return;
 
-            const svgObject = paneEl.querySelector('object[data-session-id]');
-            if (svgObject) {
-                // 强制刷新 SVG，添加时间戳避免缓存
-                svgObject.data = `/api/pane/${sessionId}/svg?t=${Date.now()}`;
-            }
+            const svgContainer = paneEl.querySelector('.pane-svg-container');
+            const oldSvgObject = svgContainer?.querySelector('object[data-session-id]');
+            if (!svgContainer || !oldSvgObject) return;
+
+            // 创建新的 object 元素预加载
+            const newSvgObject = document.createElement('object');
+            newSvgObject.type = 'image/svg+xml';
+            newSvgObject.data = `/api/pane/${sessionId}/svg?t=${Date.now()}`;
+            newSvgObject.dataset.sessionId = sessionId;
+            newSvgObject.style.position = 'absolute';
+            newSvgObject.style.top = '0';
+            newSvgObject.style.left = '0';
+            newSvgObject.style.width = '100%';
+            newSvgObject.style.height = '100%';
+            newSvgObject.style.opacity = '0';
+
+            // 加载完成后替换
+            newSvgObject.onload = () => {
+                newSvgObject.style.opacity = '1';
+                newSvgObject.style.position = '';
+                oldSvgObject.remove();
+            };
+
+            // 加载失败时清理
+            newSvgObject.onerror = () => {
+                newSvgObject.remove();
+            };
+
+            svgContainer.appendChild(newSvgObject);
         }
 
         // 刷新所有有更新的 pane 的 SVG
@@ -1103,6 +1318,13 @@
             if (titleEl && titleEl.textContent !== (tabData.name || 'Tab')) {
                 titleEl.textContent = tabData.name || 'Tab';
             }
+
+            // 更新宽度（tabsPerRow 可能改变）
+            const gapPx = 15;
+            const widthPercent = 100 / tabsPerRow;
+            const gapOffset = gapPx * (tabsPerRow - 1) / tabsPerRow;
+            tabEl.style.flex = `0 0 calc(${widthPercent}% - ${gapOffset}px)`;
+            tabEl.style.maxWidth = `calc(${widthPercent}% - ${gapOffset}px)`;
         }
 
         // 上一次的状态，用于检测状态变化发送通知
@@ -1232,8 +1454,14 @@
                     container.appendChild(windowEl);
                 }
 
+                // 更新隐藏 tabs 按钮
+                updateWindowHiddenTabs(windowEl, windowData);
+
+                // 过滤掉隐藏的 tabs
+                const visibleTabs = windowData.tabs.filter(tab => !isTabHidden(windowData.window_id, tab.tab_id));
+
                 // 处理 tabs
-                updateTabs(windowEl, windowData.tabs, updatedSessions, activeSessionId, paneStatuses);
+                updateTabs(windowEl, visibleTabs, windowData.window_id, updatedSessions, activeSessionId, paneStatuses);
             });
 
             // 删除不存在的 window
@@ -1244,7 +1472,7 @@
             });
         }
 
-        function updateTabs(windowEl, tabs, updatedSessions, activeSessionId, paneStatuses) {
+        function updateTabs(windowEl, tabs, windowId, updatedSessions, activeSessionId, paneStatuses) {
             // 获取现有 tab 元素
             const existingTabs = new Map();
             windowEl.querySelectorAll('.tab-display-wrapper').forEach(el => {
@@ -1262,7 +1490,7 @@
                     updateTabTitle(tabEl, tabData);
                 } else {
                     // 创建新 tab
-                    tabEl = createTabElement(tabData);
+                    tabEl = createTabElement(tabData, windowId);
                     windowEl.appendChild(tabEl);
                 }
 
@@ -1270,7 +1498,7 @@
                 updatePanes(tabEl, tabData.panes, updatedSessions, activeSessionId, paneStatuses);
             });
 
-            // 删除不存在的 tab
+            // 删除不存在的 tab（包括被隐藏的）
             existingTabs.forEach((el, id) => {
                 if (!newTabIds.has(id)) {
                     el.remove();
