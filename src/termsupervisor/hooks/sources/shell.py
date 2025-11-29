@@ -57,7 +57,13 @@ class ShellHookSource(HookSource):
         event_type: str,
         info: str | int
     ) -> None:
-        """处理命令事件"""
+        """处理命令事件
+
+        Args:
+            session_id: iTerm2 session_id
+            event_type: "command_start" | "command_end"
+            info: 命令字符串(start) 或 退出码(end)
+        """
         if event_type == "command_start":
             # 命令开始
             command = str(info) if info else ""
@@ -68,7 +74,8 @@ class ShellHookSource(HookSource):
                 source=self.source_name,
                 status=TaskStatus.RUNNING,
                 reason=f"执行: {command[:30]}..." if len(command) > 30 else f"执行: {command}",
-                data={"command": command}
+                event_type="command_start",
+                raw_data={"command": command}
             )
 
         elif event_type == "command_end":
@@ -76,23 +83,14 @@ class ShellHookSource(HookSource):
             exit_code = int(info) if info else 0
             command = self._current_commands.pop(session_id, "")
 
-            if exit_code == 0:
-                await self.manager.update_status(
-                    pane_id=session_id,
-                    source=self.source_name,
-                    status=TaskStatus.COMPLETED,
-                    reason="命令执行完成",
-                    data={"command": command, "exit_code": exit_code}
-                )
-            else:
-                await self.manager.update_status(
-                    pane_id=session_id,
-                    source=self.source_name,
-                    status=TaskStatus.FAILED,
-                    reason=f"命令失败 (exit={exit_code})",
-                    data={"command": command, "exit_code": exit_code}
-                )
+            status = TaskStatus.COMPLETED if exit_code == 0 else TaskStatus.FAILED
+            reason = "命令执行完成" if exit_code == 0 else f"命令失败 (exit={exit_code})"
 
-            # 短暂延迟后设为 IDLE（等待新命令）
-            # 这样前端可以短暂显示 COMPLETED/FAILED 状态
-            # Note: 实际的 IDLE 状态会在下一次 prompt 出现时由 shell integration 触发
+            await self.manager.update_status(
+                pane_id=session_id,
+                source=self.source_name,
+                status=status,
+                reason=reason,
+                event_type="command_end",
+                raw_data={"command": command, "exit_code": exit_code}
+            )

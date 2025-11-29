@@ -75,7 +75,7 @@ class ClaudeCodeHookSource(HookSource):
         Args:
             pane_id: iTerm2 session_id (来自 $ITERM_SESSION_ID)
             event: 事件类型
-            data: 额外数据
+            data: 额外数据（原始 HTTP 请求数据）
         """
         status = self.EVENT_STATUS_MAP.get(event, TaskStatus.UNKNOWN)
         reason = self.EVENT_REASON_MAP.get(event, "")
@@ -92,10 +92,17 @@ class ClaudeCodeHookSource(HookSource):
 
         logger.info(f"[ClaudeCodeHook] pane={pane_id} event={event} status={status.value}")
 
+        # 构造原始数据，保留完整的 HTTP 请求内容
+        raw_data = {
+            "hook_event": event,
+            **(data or {})
+        }
+
         await self.manager.update_status(
             pane_id=pane_id,
             source=self.source_name,
             status=status,
             reason=reason,
-            data=data or {}
+            event_type=event,  # 原始事件类型
+            raw_data=raw_data
         )

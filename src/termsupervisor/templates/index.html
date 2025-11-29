@@ -1666,17 +1666,11 @@
                 }
             }
 
-            // 检测状态变化
+            // 检测状态变化 - 仅用于清除已确认标记，不发送通知
+            // 通知完全由 Hook 系统驱动（handleHookStatus），轮询不触发通知
             const prevStatus = previousStatuses[sessionId];
-
-            // 状态变化时，如果是新的需要通知的状态，清除已确认标记并发送通知
             if (prevStatus !== status && needsNotification) {
                 acknowledgedSessions.delete(sessionId);
-                // 使用 tab 名称
-                const location = getPaneLocation(sessionId);
-                const source = statusInfo.source || 'unknown';
-                const title = `[${location.tabName || 'Tab'}][${source}]`;
-                showToast(status, title, statusReason, sessionId);
             }
             previousStatuses[sessionId] = status;
 

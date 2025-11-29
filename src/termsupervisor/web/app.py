@@ -89,32 +89,26 @@ async def start_server(connection: iterm2.Connection):
 
     server = create_app(supervisor, iterm_client)
 
-    # 如果使用 hook 分析器，初始化 Hook 系统
-    shell_source = None
-    if config.ANALYZER_TYPE == "hook":
-        hook_manager, shell_source, claude_code_source = await setup_hook_system(
-            server, connection
-        )
-        print(f"[HookSystem] 使用 Hook 分析器 (Shell + Claude Code)")
-    else:
-        print(f"[Analyzer] 使用 {config.ANALYZER_TYPE} 分析器")
+    # 初始化 Hook 系统（状态管理的唯一来源）
+    hook_manager, shell_source, claude_code_source = await setup_hook_system(
+        server, connection
+    )
+    print("[HookSystem] Hook 系统已启动 (Shell + Claude Code)")
 
     supervisor_task = asyncio.create_task(supervisor.run(connection))
 
-    # 如果有 shell_source，需要定期同步 session 列表
-    sync_task = None
-    if shell_source:
-        async def sync_sessions():
-            while True:
-                try:
-                    # 获取当前所有 session_id
-                    session_ids = set(supervisor.snapshots.keys())
-                    await shell_source.sync_sessions(session_ids)
-                except Exception as e:
-                    logger.error(f"[HookSystem] 同步 sessions 失败: {e}")
-                await asyncio.sleep(config.INTERVAL)
+    # 定期同步 session 列表到 Shell Hook Source
+    async def sync_sessions():
+        while True:
+            try:
+                # 获取当前所有 session_id
+                session_ids = set(supervisor.snapshots.keys())
+                await shell_source.sync_sessions(session_ids)
+            except Exception as e:
+                logger.error(f"[HookSystem] 同步 sessions 失败: {e}")
+            await asyncio.sleep(config.POLL_INTERVAL)
 
-        sync_task = asyncio.create_task(sync_sessions())
+    sync_task = asyncio.create_task(sync_sessions())
 
     uvicorn_config = uvicorn.Config(
         server.app,
@@ -131,10 +125,8 @@ async def start_server(connection: iterm2.Connection):
     finally:
         supervisor.stop()
         supervisor_task.cancel()
-        if sync_task:
-            sync_task.cancel()
-        if shell_source:
-            await shell_source.stop()
+        sync_task.cancel()
+        await shell_source.stop()
 
 
 def main():

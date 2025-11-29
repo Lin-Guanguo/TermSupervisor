@@ -8,7 +8,7 @@ from datetime import datetime
 import iterm2
 
 from termsupervisor import config
-from termsupervisor.models import LayoutData, PaneSnapshot, UpdateCallback, PaneChange, PaneHistory
+from termsupervisor.models import LayoutData, PaneSnapshot, UpdateCallback, PaneChange, PaneHistory, PaneChangeQueue
 from termsupervisor.iterm import get_layout, normalize_session_id, session_id_match
 from termsupervisor.analysis import create_analyzer, TaskStatus
 
@@ -36,7 +36,10 @@ class TermSupervisor:
 
         # 状态分析
         self.pane_histories: dict[str, PaneHistory] = {}
-        self.analyzer = create_analyzer(config.ANALYZER_TYPE)
+        self.analyzer = create_analyzer()  # 返回空分析器，状态由 HookManager 管理
+
+        # 变化队列 (用于智能节流)
+        self.pane_queues: dict[str, PaneChangeQueue] = {}
 
     def on_update(self, callback: UpdateCallback):
         """注册更新回调"""
@@ -129,8 +132,20 @@ class TermSupervisor:
         except Exception as e:
             return f"[Error: {e}]"
 
+    def _get_or_create_queue(self, session_id: str) -> PaneChangeQueue:
+        """获取或创建 PaneChangeQueue"""
+        if session_id not in self.pane_queues:
+            self.pane_queues[session_id] = PaneChangeQueue(session_id)
+        return self.pane_queues[session_id]
+
     async def check_updates(self, connection: iterm2.Connection) -> list[str]:
-        """检查所有 pane 的更新"""
+        """检查所有 pane 的更新
+
+        使用 PaneChangeQueue 进行智能节流：
+        - 每秒读取内容，更新队列
+        - 根据变化大小决定是否触发页面刷新
+        - 大变化时记录到队列历史
+        """
         app = await iterm2.async_get_app(connection)
         self.layout = await get_layout(app, self.exclude_names)
         now = datetime.now()
@@ -147,12 +162,19 @@ class TermSupervisor:
 
                     content = await self._get_session_content(session)
 
+                    # 获取或创建变化队列
+                    queue = self._get_or_create_queue(pane.session_id)
+
+                    # 使用队列判断是否需要刷新
+                    should_refresh = queue.check_and_record(content)
+
                     if pane.session_id in self.snapshots:
-                        old_snapshot = self.snapshots[pane.session_id]
-                        has_change, changed_lines = self._has_significant_change(
-                            old_snapshot.content, content
-                        )
-                        if has_change:
+                        if should_refresh:
+                            # 需要刷新页面
+                            old_snapshot = self.snapshots[pane.session_id]
+                            _, changed_lines = self._has_significant_change(
+                                old_snapshot.content, content
+                            )
                             updated_sessions.append(pane.session_id)
                             self._log_update(now, pane, changed_lines)
                             self.snapshots[pane.session_id] = PaneSnapshot(
@@ -162,12 +184,13 @@ class TermSupervisor:
                                 updated_at=now,
                             )
 
-                            # 记录变化到 PaneHistory
+                            # 记录变化到 PaneHistory (兼容旧逻辑)
                             history = self._get_or_create_history(pane.session_id, pane.name)
                             pane_change = self._create_pane_change(content, changed_lines)
                             history.add_change(pane_change)
                             panes_to_analyze.append(history)
                     else:
+                        # 新发现的 pane
                         print(f"[{now.strftime('%H:%M:%S')}] 发现新 Panel [{pane.index}]: {pane.name}")
                         self.snapshots[pane.session_id] = PaneSnapshot(
                             session_id=pane.session_id,
@@ -177,6 +200,8 @@ class TermSupervisor:
                         )
                         # 新 pane 也创建历史记录
                         self._get_or_create_history(pane.session_id, pane.name)
+                        # 新 pane 直接加入刷新列表
+                        updated_sessions.append(pane.session_id)
 
         # 执行状态分析
         await self._analyze_panes(panes_to_analyze)
@@ -233,23 +258,27 @@ class TermSupervisor:
             # 同时清理 pane_histories
             if session_id in self.pane_histories:
                 del self.pane_histories[session_id]
+            # 同时清理 pane_queues
+            if session_id in self.pane_queues:
+                del self.pane_queues[session_id]
 
     async def run(self, connection: iterm2.Connection):
         """运行监控服务"""
         self._running = True
-        print(f"TermSupervisor 已启动，监控间隔: {self.interval}s")
+        poll_interval = config.POLL_INTERVAL
+        print(f"TermSupervisor 已启动，轮询间隔: {poll_interval}s")
         print("按 Ctrl+C 停止\n")
 
         while self._running:
             try:
                 await self.check_updates(connection)
                 await self._notify_callbacks()
-                await asyncio.sleep(self.interval)
+                await asyncio.sleep(poll_interval)
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 print(f"Error: {e}")
-                await asyncio.sleep(self.interval)
+                await asyncio.sleep(poll_interval)
 
         print("\nTermSupervisor 已停止")
 
