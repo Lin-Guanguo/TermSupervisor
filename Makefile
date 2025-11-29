@@ -1,4 +1,4 @@
-.PHONY: run rerun run-web run-cli stop viewlog taillog clean test help
+.PHONY: run rerun run-web run-cli stop viewlog taillog loghook logerr clean test help
 
 LOG_FILE = server.log
 PROC_NAME = termsupervisor
@@ -52,6 +52,22 @@ viewlog:
 taillog:
 	@if [ -f $(LOG_FILE) ]; then \
 		tail -f $(LOG_FILE); \
+	else \
+		echo "No log file found"; \
+	fi
+
+# 实时监控 Hook 事件
+loghook:
+	@if [ -f $(LOG_FILE) ]; then \
+		tail -f $(LOG_FILE) | while IFS= read -r line; do echo "$$line" | grep -q "\[HookEvent\]" && echo "$$line"; done; \
+	else \
+		echo "No log file found"; \
+	fi
+
+# 实时监控错误日志
+logerr:
+	@if [ -f $(LOG_FILE) ]; then \
+		tail -f $(LOG_FILE) | while IFS= read -r line; do echo "$$line" | grep -qiE "error|exception|traceback|failed" && echo "$$line"; done; \
 	else \
 		echo "No log file found"; \
 	fi

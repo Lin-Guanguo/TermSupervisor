@@ -1,13 +1,16 @@
 """WebSocket 消息处理器"""
 
 import json
-from dataclasses import dataclass
-from typing import Callable, Awaitable
+from dataclasses import dataclass, field
+from typing import Callable, Awaitable, TYPE_CHECKING
 
 from fastapi import WebSocket
 
 from termsupervisor.iterm import ITerm2Client
 from termsupervisor.supervisor import TermSupervisor
+
+if TYPE_CHECKING:
+    from termsupervisor.hooks import HookManager
 
 
 @dataclass
@@ -17,6 +20,7 @@ class MessageHandler:
     iterm_client: ITerm2Client
     supervisor: TermSupervisor
     broadcast: Callable[[dict], Awaitable[None]]
+    hook_manager: "HookManager | None" = field(default=None)
 
     async def handle(self, websocket: WebSocket, data: str):
         """处理 WebSocket 消息"""
@@ -26,8 +30,13 @@ class MessageHandler:
             await self._handle_json(websocket, data)
 
     async def _handle_activate(self, websocket: WebSocket, data: str):
-        """处理激活请求"""
+        """处理激活请求（用户点击 pane）"""
         session_id = data.split(":", 1)[1]
+
+        # 通知 HookManager 用户点击事件，清除 DONE/FAILED 状态
+        if self.hook_manager:
+            await self.hook_manager.process_user_click(session_id)
+
         success = await self.iterm_client.activate_session(session_id)
         await websocket.send_json({
             "type": "activate_result",

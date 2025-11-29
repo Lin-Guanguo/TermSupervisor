@@ -68,8 +68,8 @@ class EventProcessor:
         pane_id = event.pane_id
         signal = event.signal
 
-        # 记录事件日志
-        logger.debug(event.format_log())
+        # 记录事件日志（直接 print 确保可见）
+        print(event.format_log())
 
         # 获取当前状态
         current = self.state_store.get(pane_id)

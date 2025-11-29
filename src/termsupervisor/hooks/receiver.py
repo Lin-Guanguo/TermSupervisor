@@ -36,6 +36,11 @@ class HookReceiver:
         self.manager = manager
         self._adapters: dict = {}  # source_name -> HookSource
 
+    @property
+    def hook_manager(self) -> "HookManager":
+        """获取 HookManager 实例"""
+        return self.manager
+
     def register_adapter(self, adapter) -> None:
         """注册适配器"""
         self._adapters[adapter.source_name] = adapter

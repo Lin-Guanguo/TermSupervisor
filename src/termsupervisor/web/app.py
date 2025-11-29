@@ -32,6 +32,7 @@ async def setup_hook_system(
     from termsupervisor.hooks import HookReceiver
     from termsupervisor.hooks.sources.shell import ShellHookSource
     from termsupervisor.hooks.sources.claude_code import ClaudeCodeHookSource
+    from termsupervisor.hooks.sources.iterm import ItermHookSource
 
     # 获取 HookManager 单例
     hook_manager = get_hook_manager()
@@ -63,6 +64,7 @@ async def setup_hook_system(
     # 创建适配器
     shell_source = ShellHookSource(hook_manager, connection)
     claude_code_source = ClaudeCodeHookSource(hook_manager)
+    iterm_source = ItermHookSource(hook_manager, connection)
 
     # 创建接收器并注册适配器
     receiver = HookReceiver(hook_manager)
@@ -74,9 +76,10 @@ async def setup_hook_system(
     # 启动适配器
     await shell_source.start()
     await claude_code_source.start()
+    await iterm_source.start()
 
     logger.info("[HookSystem] Hook 系统已初始化")
-    return hook_manager, shell_source, claude_code_source
+    return hook_manager, shell_source, claude_code_source, iterm_source
 
 
 async def start_server(connection: iterm2.Connection):
@@ -93,10 +96,10 @@ async def start_server(connection: iterm2.Connection):
     server = create_app(supervisor, iterm_client)
 
     # 初始化 Hook 系统（状态管理的唯一来源）
-    hook_manager, shell_source, claude_code_source = await setup_hook_system(
+    hook_manager, shell_source, claude_code_source, iterm_source = await setup_hook_system(
         server, connection
     )
-    print("[HookSystem] Hook 系统已启动 (Shell + Claude Code)")
+    print("[HookSystem] Hook 系统已启动 (Shell + Claude Code + iTerm Focus)")
 
     supervisor_task = asyncio.create_task(supervisor.run(connection))
 
@@ -130,6 +133,7 @@ async def start_server(connection: iterm2.Connection):
         supervisor_task.cancel()
         sync_task.cancel()
         await shell_source.stop()
+        await iterm_source.stop()
 
 
 def main():

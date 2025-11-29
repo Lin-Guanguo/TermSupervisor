@@ -44,6 +44,8 @@ class WebServer:
         """设置 Hook 接收器"""
         self._hook_receiver = receiver
         receiver.setup_routes(self.app)
+        # 将 HookManager 传给 MessageHandler，用于处理用户点击事件
+        self._handler.hook_manager = receiver.hook_manager
 
     async def _on_layout_update(self, layout: LayoutData):
         """布局更新回调"""

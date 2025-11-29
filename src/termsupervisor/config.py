@@ -50,7 +50,7 @@ RENDER_EVENT_MIN_INTERVAL_SECONDS = 10.0  # render 事件最小间隔
 RENDER_EVENT_MIN_LINES_CHANGED = 5        # 最小变化行数才触发事件
 
 # === Focus 防抖配置 ===
-FOCUS_DEBOUNCE_SECONDS = 3.0              # iTerm2 focus 防抖时间
+FOCUS_DEBOUNCE_SECONDS = 2.0              # iTerm2 focus 防抖时间
 
 # === Source 优先级 ===
 # 数字越大优先级越高，高优先级 source 可以覆盖低优先级状态
