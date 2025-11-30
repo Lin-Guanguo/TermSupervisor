@@ -10,7 +10,8 @@ import iterm2
 from termsupervisor import config
 from termsupervisor.models import LayoutData, PaneSnapshot, UpdateCallback, PaneChange, PaneHistory, PaneChangeQueue
 from termsupervisor.iterm import get_layout, normalize_session_id, session_id_match
-from termsupervisor.analysis import create_analyzer, TaskStatus, get_hook_manager
+from termsupervisor.analysis import create_analyzer, get_hook_manager, ContentCleaner
+from termsupervisor.pane import TaskStatus
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +190,15 @@ class TermSupervisor:
                             pane_change = self._create_pane_change(content, changed_lines)
                             history.add_change(pane_change)
                             panes_to_analyze.append(history)
+
+                            # 通知 HookManager 内容变化（触发 WAITING_APPROVAL 兜底恢复）
+                            hook_manager = get_hook_manager()
+                            content_hash = ContentCleaner.content_hash(content)
+                            await hook_manager.process_content_changed(
+                                pane.session_id,
+                                content=content,
+                                content_hash=content_hash,
+                            )
                     else:
                         # 新发现的 pane
                         print(f"[{now.strftime('%H:%M:%S')}] 发现新 Panel [{pane.index}]: {pane.name}")
@@ -326,17 +336,29 @@ class TermSupervisor:
                 for pane in tab.panes:
                     session_id = pane.session_id
                     state = hook_manager.get_state(session_id)
-                    status = state.status
 
-                    pane_statuses[session_id] = {
-                        "status": status.value,
-                        "status_color": status.color,
-                        "status_reason": state.description,
-                        "is_running": status.is_running,
-                        "needs_notification": status.needs_notification,
-                        "needs_attention": status.needs_attention,
-                        "display": status.display,
-                    }
+                    if state:
+                        status = state.status
+                        pane_statuses[session_id] = {
+                            "status": status.value,
+                            "status_color": status.color,
+                            "status_reason": state.description,
+                            "is_running": status.is_running,
+                            "needs_notification": status.needs_notification,
+                            "needs_attention": status.needs_attention,
+                            "display": status.display,
+                        }
+                    else:
+                        # Pane 尚未被 HookManager 跟踪，使用默认 IDLE 状态
+                        pane_statuses[session_id] = {
+                            "status": TaskStatus.IDLE.value,
+                            "status_color": TaskStatus.IDLE.color,
+                            "status_reason": "",
+                            "is_running": False,
+                            "needs_notification": False,
+                            "needs_attention": False,
+                            "display": "",
+                        }
 
         data["pane_statuses"] = pane_statuses
         return data

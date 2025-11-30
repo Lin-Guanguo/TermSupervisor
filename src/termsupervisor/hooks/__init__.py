@@ -1,33 +1,28 @@
 """Hook 系统 - 接收外部工具状态事件
 
 模块结构：
-- state: PaneState, StateHistoryEntry 数据结构
-- state_machine: StateMachine 状态转换逻辑
-- state_store: StateStore 状态存储
-- event_processor: EventProcessor, HookEvent 事件处理
-- manager: HookManager 原有管理器（待重构）
+- manager: HookManager 门面（主入口）
 - receiver: HookReceiver HTTP 接收器
 - sources/: 各类 Hook 源
+
+类型重导出：
+- TaskStatus, HookEvent 等类型统一从 pane 模块导出
 """
 
+# 主模块
 from .manager import HookManager
 from .receiver import HookReceiver
 from .sources.base import HookSource
-from .state import PaneState, StateHistoryEntry
-from .state_machine import StateMachine
-from .state_store import StateStore
-from .event_processor import EventProcessor, HookEvent
+
+# 统一类型（从 pane 模块重导出）
+from ..pane import TaskStatus, HookEvent
 
 __all__ = [
-    # 新状态机模块
-    "PaneState",
-    "StateHistoryEntry",
-    "StateMachine",
-    "StateStore",
-    "EventProcessor",
-    "HookEvent",
-    # 原有模块
+    # 主模块
     "HookManager",
     "HookReceiver",
     "HookSource",
+    # 类型
+    "TaskStatus",
+    "HookEvent",
 ]

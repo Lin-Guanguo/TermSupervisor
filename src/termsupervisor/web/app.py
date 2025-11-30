@@ -27,16 +27,17 @@ async def setup_hook_system(
     """设置 Hook 系统
 
     Returns:
-        (hook_manager, shell_source, claude_code_source)
+        (hook_manager, shell_source, claude_code_source, iterm_source, timer)
     """
-    from termsupervisor.analysis import get_hook_manager
+    from termsupervisor.analysis import get_hook_manager, get_timer
     from termsupervisor.hooks import HookReceiver
     from termsupervisor.hooks.sources.shell import ShellHookSource
     from termsupervisor.hooks.sources.claude_code import ClaudeCodeHookSource
     from termsupervisor.hooks.sources.iterm import ItermHookSource
 
-    # 获取 HookManager 单例
+    # 获取 HookManager 和 Timer 单例
     hook_manager = get_hook_manager()
+    timer = get_timer()
 
     # 设置状态变更回调 -> 广播到前端
     async def on_status_change(pane_id: str, status, reason: str, source: str, suppressed: bool):
@@ -95,7 +96,7 @@ async def setup_hook_system(
     await iterm_source.start()
 
     logger.info("[HookSystem] Hook 系统已初始化")
-    return hook_manager, shell_source, claude_code_source, iterm_source
+    return hook_manager, shell_source, claude_code_source, iterm_source, timer
 
 
 async def start_server(connection: iterm2.Connection):
@@ -112,10 +113,14 @@ async def start_server(connection: iterm2.Connection):
     server = create_app(supervisor, iterm_client)
 
     # 初始化 Hook 系统（状态管理的唯一来源）
-    hook_manager, shell_source, claude_code_source, iterm_source = await setup_hook_system(
+    hook_manager, shell_source, claude_code_source, iterm_source, timer = await setup_hook_system(
         server, connection
     )
     print("[HookSystem] Hook 系统已启动 (Shell + Claude Code + iTerm Focus)")
+
+    # 启动 Timer（LONG_RUNNING 检查 + Pane 延迟任务）
+    timer_task = asyncio.create_task(timer.run())
+    print("[Timer] Timer 已启动")
 
     supervisor_task = asyncio.create_task(supervisor.run(connection))
 
@@ -146,9 +151,12 @@ async def start_server(connection: iterm2.Connection):
         await uvicorn_server.serve()
     finally:
         supervisor.stop()
+        timer.stop()
         supervisor_task.cancel()
+        timer_task.cancel()
         sync_task.cancel()
         await shell_source.stop()
+        await claude_code_source.stop()
         await iterm_source.stop()
 
 

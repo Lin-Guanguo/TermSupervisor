@@ -1,56 +1,64 @@
-"""Hook 状态管理器 - 基于状态机的单一状态管理"""
+"""HookManager - Hook 系统门面
 
-import logging
-from typing import Callable, Awaitable
+统一入口：
+- 组装 HookEvent（补全 generation/time/signal）
+- 调用 StateManager 处理事件
+- 提供便捷 API
+"""
 
-from ..analysis.base import TaskStatus
-from .state import PaneState
-from .state_machine import StateMachine
-from .state_store import StateStore
-from .event_processor import EventProcessor, HookEvent
+from datetime import datetime
+from typing import Callable, Any, TYPE_CHECKING
 
-logger = logging.getLogger(__name__)
+from ..telemetry import get_logger, metrics
+from ..pane import TaskStatus, HookEvent, StateManager, DisplayState
 
+if TYPE_CHECKING:
+    from ..timer import Timer
 
-# 状态变更回调类型: (pane_id, status, description, source, suppressed) -> None
-StatusChangeCallback = Callable[[str, TaskStatus, str, str, bool], Awaitable[None]]
+logger = get_logger(__name__)
 
-# Focus 检查函数类型: (pane_id) -> bool
+# 回调类型
+StatusChangeCallback = Callable[[str, TaskStatus, str, str, bool], Any]
 FocusChecker = Callable[[str], bool]
 
 
 class HookManager:
-    """Hook 状态管理器 - 基于状态机
+    """Hook 系统门面
 
-    使用单一状态模型，通过 StateMachine 处理状态转换。
-    支持多种信号源：shell, claude-code, gemini, codex, render, timer, user
+    提供统一的事件处理入口，内部持有 Timer 和 StateManager。
 
-    优先级机制：
-    - claude-code/gemini/codex: 高优先级 (10)
-    - shell/render: 低优先级 (1)
-    - timer: 最低优先级 (0)
-    - 用户操作 (iterm/frontend): 总是可以覆盖
+    使用示例:
+        timer = Timer()
+        manager = HookManager(timer=timer)
+
+        # 处理 shell 命令
+        await manager.process_shell_command_start(pane_id, "ls -la")
+        await manager.process_shell_command_end(pane_id, 0)
+
+        # 处理 Claude 事件
+        await manager.process_claude_code_event(pane_id, "PreToolUse", {"tool_name": "Read"})
     """
 
-    def __init__(self):
-        self._state_store = StateStore()
-        self._state_machine = StateMachine()
-        self._event_processor = EventProcessor(self._state_store, self._state_machine)
+    def __init__(self, timer: "Timer | None" = None, state_manager: StateManager | None = None):
+        """初始化
+
+        Args:
+            timer: Timer 实例
+            state_manager: StateManager 实例（可选，默认创建新的）
+        """
+        self._timer = timer
+        self._state_manager = state_manager or StateManager(timer=timer)
         self._on_change: StatusChangeCallback | None = None
 
-        # 设置状态变更回调
-        self._state_store.set_change_callback(self._on_state_change)
+        # 绑定内部回调
+        self._state_manager.set_on_display_change(self._on_display_change)
 
-    async def _on_state_change(self, pane_id: str, state: PaneState, suppressed: bool, reason: str) -> None:
-        """状态变更内部回调 - 转发给外部回调"""
-        if self._on_change:
-            await self._on_change(
-                pane_id,
-                state.status,
-                state.description,
-                state.source,
-                suppressed
-            )
+    # === 配置 ===
+
+    def set_timer(self, timer: "Timer") -> None:
+        """设置 Timer"""
+        self._timer = timer
+        self._state_manager.set_timer(timer)
 
     def set_change_callback(self, callback: StatusChangeCallback) -> None:
         """设置状态变更回调
@@ -61,212 +69,305 @@ class HookManager:
         self._on_change = callback
 
     def set_focus_checker(self, checker: FocusChecker) -> None:
-        """设置 focus 检查函数
+        """设置 focus 检查函数"""
+        self._state_manager.set_focus_checker(checker)
 
-        Args:
-            checker: 函数 (pane_id) -> bool，返回该 pane 是否正被 focus
-        """
-        self._state_store.set_focus_checker(checker)
-        self._event_processor.set_focus_checker(checker)
-
-    # ==================== 事件处理 API ====================
-
-    async def update_status(
+    def _on_display_change(
         self,
         pane_id: str,
-        source: str,
-        status: TaskStatus,
-        reason: str = "",
-        event_type: str = "",
-        raw_data: dict | None = None
+        display_state: DisplayState,
+        suppressed: bool,
+        reason: str
     ) -> None:
-        """更新状态（兼容旧 API）
+        """内部显示变化回调"""
+        if self._on_change:
+            self._on_change(
+                pane_id,
+                display_state.status,
+                display_state.description,
+                display_state.source,
+                suppressed,
+            )
 
-        将旧格式的状态更新转换为新的 Signal 格式。
+    # === 事件处理 ===
 
-        Args:
-            pane_id: iTerm2 session_id
-            source: 来源标识 (shell, claude-code, etc.)
-            status: 任务状态（用于映射到事件类型）
-            reason: 状态原因（作为 description）
-            event_type: 原始事件类型
-            raw_data: 原始数据
-        """
-        # 构造 Signal
-        signal_event = self._map_to_signal_event(source, status, event_type)
-
-        # 构造 HookEvent
-        event = HookEvent(
-            source=source,
-            pane_id=pane_id,
-            event_type=signal_event,
-            raw_data=raw_data or {}
-        )
-
-        # 添加 description 信息到 raw_data
-        if reason and "description" not in event.raw_data:
-            event.raw_data["description"] = reason
-
-        # 记录事件日志
-        logger.info(event.format_log())
-
-        # 处理事件
-        await self._event_processor.process(event)
-
-    def _map_to_signal_event(
+    def _normalize_event(
         self,
         source: str,
-        status: TaskStatus,
-        event_type: str
-    ) -> str:
-        """将旧格式映射到新的 Signal event_type
+        pane_id: str,
+        event_type: str,
+        data: dict | None = None,
+    ) -> HookEvent:
+        """构造并规范化 HookEvent
+
+        补全 generation、timestamp、signal。
 
         Args:
-            source: 来源
-            status: 状态
-            event_type: 原始事件类型
+            source: 事件源
+            pane_id: pane 标识
+            event_type: 事件类型
+            data: 事件数据
 
         Returns:
-            Signal 中的 event_type
+            规范化的 HookEvent
         """
-        # 如果已有 event_type，直接使用
-        if event_type:
-            # 转换为 PascalCase 格式（如果需要）
-            return self._normalize_event_type(source, event_type)
+        generation = self._state_manager.get_generation(pane_id)
+        return HookEvent(
+            source=source,
+            pane_id=pane_id,
+            event_type=event_type,
+            signal=f"{source}.{event_type}",
+            data=data or {},
+            timestamp=datetime.now().timestamp(),
+            pane_generation=generation,
+        )
 
-        # 根据 status 映射默认事件
-        if source == "shell":
-            if status == TaskStatus.RUNNING:
-                return "command_start"
-            elif status in (TaskStatus.DONE, TaskStatus.FAILED):
-                return "command_end"
-            return "unknown"
-
-        if source == "claude-code":
-            status_to_event = {
-                TaskStatus.RUNNING: "PreToolUse",
-                TaskStatus.DONE: "Stop",
-                TaskStatus.FAILED: "Stop",
-                TaskStatus.IDLE: "SessionEnd",
-                TaskStatus.WAITING_APPROVAL: "Notification:permission_prompt",
-            }
-            return status_to_event.get(status, "unknown")
-
-        return "unknown"
-
-    def _normalize_event_type(self, source: str, event_type: str) -> str:
-        """规范化事件类型名称
+    async def process_event(self, event: HookEvent) -> bool:
+        """处理事件
 
         Args:
-            source: 来源
-            event_type: 原始事件类型
+            event: Hook 事件
 
         Returns:
-            规范化后的事件类型
+            是否成功入队
         """
-        if source == "claude-code":
-            # Claude Code 事件映射
-            event_map = {
-                "stop": "Stop",
-                "pre_tool": "PreToolUse",
-                "post_tool": "PostToolUse",
-                "session_start": "SessionStart",
-                "session_end": "SessionEnd",
-                "permission_prompt": "Notification:permission_prompt",
-                "idle_prompt": "Notification:idle_prompt",
-                "subagent_stop": "SubagentStop",
-            }
-            return event_map.get(event_type.lower(), event_type)
+        # 如果 generation 缺失，补全
+        if event.pane_generation == 0:
+            event.pane_generation = self._state_manager.get_generation(event.pane_id)
 
-        # shell 事件保持不变
-        return event_type
+        # 入队并处理
+        if self._state_manager.enqueue(event):
+            await self._state_manager.process_queued(event.pane_id)
+            return True
+        return False
 
-    # ==================== 状态查询 API ====================
-
-    def get_status(self, pane_id: str) -> TaskStatus:
-        """获取 pane 的当前状态"""
-        return self._state_store.get_status(pane_id)
-
-    def get_reason(self, pane_id: str) -> str:
-        """获取 pane 的状态描述"""
-        return self._state_store.get_description(pane_id)
-
-    def get_active_source(self, pane_id: str) -> str:
-        """获取当前状态的来源"""
-        return self._state_store.get(pane_id).source
-
-    def get_state(self, pane_id: str) -> PaneState:
-        """获取完整的 PaneState"""
-        return self._state_store.get(pane_id)
-
-    def get_all_panes(self) -> set[str]:
-        """获取所有有状态的 pane_id"""
-        return self._state_store.get_all_panes()
-
-    def get_all_states(self) -> dict[str, PaneState]:
-        """获取所有状态"""
-        return self._state_store.get_all_states()
-
-    # ==================== 便捷方法 ====================
+    # === Shell 事件 ===
 
     async def process_shell_command_start(self, pane_id: str, command: str) -> bool:
         """处理 shell 命令开始"""
-        return await self._event_processor.process_shell_command_start(pane_id, command)
+        event = self._normalize_event(
+            source="shell",
+            pane_id=pane_id,
+            event_type="command_start",
+            data={"command": command},
+        )
+        logger.info(event.format_log())
+        return await self.process_event(event)
 
     async def process_shell_command_end(self, pane_id: str, exit_code: int) -> bool:
         """处理 shell 命令结束"""
-        return await self._event_processor.process_shell_command_end(pane_id, exit_code)
+        event = self._normalize_event(
+            source="shell",
+            pane_id=pane_id,
+            event_type="command_end",
+            data={"exit_code": exit_code},
+        )
+        logger.info(event.format_log())
+        return await self.process_event(event)
+
+    # === Claude Code 事件 ===
 
     async def process_claude_code_event(
         self,
         pane_id: str,
         event_type: str,
-        data: dict | None = None
+        data: dict | None = None,
     ) -> bool:
         """处理 Claude Code 事件"""
         # 规范化事件类型
-        normalized_event = self._normalize_event_type("claude-code", event_type)
-        return await self._event_processor.process_claude_code_event(
-            pane_id, normalized_event, data
+        normalized_type = self._normalize_claude_event_type(event_type)
+        event = self._normalize_event(
+            source="claude-code",
+            pane_id=pane_id,
+            event_type=normalized_type,
+            data=data,
         )
+        logger.info(event.format_log())
+        return await self.process_event(event)
+
+    def _normalize_claude_event_type(self, event_type: str) -> str:
+        """规范化 Claude 事件类型"""
+        event_map = {
+            "stop": "Stop",
+            "pre_tool": "PreToolUse",
+            "pre_tool_use": "PreToolUse",
+            "post_tool": "PostToolUse",
+            "post_tool_use": "PostToolUse",
+            "session_start": "SessionStart",
+            "session_end": "SessionEnd",
+            "permission_prompt": "Notification:permission_prompt",
+            "idle_prompt": "Notification:idle_prompt",
+            "subagent_stop": "SubagentStop",
+        }
+        return event_map.get(event_type.lower(), event_type)
+
+    # === 用户事件 ===
 
     async def process_user_focus(self, pane_id: str) -> bool:
         """处理用户 focus 事件"""
-        return await self._event_processor.process_user_focus(pane_id)
+        event = self._normalize_event(
+            source="iterm",
+            pane_id=pane_id,
+            event_type="focus",
+        )
+        logger.info(event.format_log())
+        return await self.process_event(event)
 
     async def process_user_click(self, pane_id: str, click_type: str = "click_pane") -> bool:
         """处理用户点击事件"""
-        return await self._event_processor.process_user_click(pane_id, click_type)
+        event = self._normalize_event(
+            source="frontend",
+            pane_id=pane_id,
+            event_type=click_type,
+        )
+        logger.info(event.format_log())
+        return await self.process_event(event)
+
+    # === 内容事件 ===
+
+    async def process_content_changed(
+        self,
+        pane_id: str,
+        content: str = "",
+        content_hash: str = "",
+    ) -> bool:
+        """处理内容变化事件"""
+        event = self._normalize_event(
+            source="content",
+            pane_id=pane_id,
+            event_type="changed",
+            data={"content": content, "content_hash": content_hash},
+        )
+        # 不记录日志（太频繁）
+        return await self.process_event(event)
+
+    # === Timer 事件 ===
 
     async def process_timer_check(self, pane_id: str, elapsed: str) -> bool:
-        """处理定时检查事件"""
-        return await self._event_processor.process_timer_check(pane_id, elapsed)
+        """处理定时检查事件（通常由 tick_all 内部调用）"""
+        event = self._normalize_event(
+            source="timer",
+            pane_id=pane_id,
+            event_type="check",
+            data={"elapsed": elapsed},
+        )
+        return await self.process_event(event)
 
-    async def process_render_content_updated(self, pane_id: str, lines_changed: int) -> bool:
-        """处理 render 内容更新事件"""
-        return await self._event_processor.process_render_content_updated(pane_id, lines_changed)
+    def tick_all(self) -> list[str]:
+        """检查所有 pane 的 LONG_RUNNING
 
-    # ==================== 状态管理 ====================
+        由 Timer 周期调用。
+
+        Returns:
+            触发了 LONG_RUNNING 的 pane_id 列表
+        """
+        return self._state_manager.tick_all()
+
+    # === 状态查询 ===
+
+    def get_status(self, pane_id: str) -> TaskStatus:
+        """获取 pane 状态"""
+        return self._state_manager.get_status(pane_id)
+
+    def get_reason(self, pane_id: str) -> str:
+        """获取状态描述"""
+        pane = self._state_manager.get_pane(pane_id)
+        return pane.display_state.description if pane else ""
+
+    def get_active_source(self, pane_id: str) -> str:
+        """获取当前状态来源"""
+        pane = self._state_manager.get_pane(pane_id)
+        return pane.display_state.source if pane else "shell"
+
+    def get_state(self, pane_id: str) -> DisplayState | None:
+        """获取完整的 DisplayState"""
+        pane = self._state_manager.get_pane(pane_id)
+        return pane.display_state if pane else None
+
+    def get_all_panes(self) -> set[str]:
+        """获取所有 pane_id"""
+        return self._state_manager.get_all_panes()
+
+    def get_all_states(self) -> dict[str, dict]:
+        """获取所有状态"""
+        return self._state_manager.get_all_states()
+
+    # === 生命周期 ===
+
+    def get_generation(self, pane_id: str) -> int:
+        """获取 pane generation"""
+        return self._state_manager.get_generation(pane_id)
+
+    def increment_generation(self, pane_id: str) -> int:
+        """递增 pane generation"""
+        return self._state_manager.increment_generation(pane_id)
+
+    # === 清理 ===
+
+    def remove_pane(self, pane_id: str) -> None:
+        """移除 pane"""
+        self._state_manager.remove_pane(pane_id)
+
+    def cleanup_closed_panes(self, active_pane_ids: set[str]) -> list[str]:
+        """清理已关闭的 pane"""
+        return self._state_manager.cleanup_closed_panes(active_pane_ids)
 
     def clear_pane(self, pane_id: str) -> None:
-        """清除 pane 的状态"""
-        self._state_store.clear(pane_id)
+        """清除 pane 状态（兼容旧 API）"""
+        self.remove_pane(pane_id)
 
     def clear_all(self) -> None:
         """清除所有状态"""
-        self._state_store.clear_all()
+        for pane_id in list(self._state_manager.get_all_panes()):
+            self.remove_pane(pane_id)
 
-    # ==================== 调试工具 ====================
+    # === 持久化 ===
+
+    def save(self) -> bool:
+        """保存状态"""
+        return self._state_manager.save()
+
+    def load(self) -> bool:
+        """加载状态"""
+        return self._state_manager.load()
+
+    # === 调试 ===
 
     def print_all_states(self) -> None:
         """打印所有状态（调试用）"""
-        self._state_store.print_all_states()
+        print("\n" + "=" * 60)
+        print("[HookManager] All States")
+        print("=" * 60)
+        for pane_id, state in self.get_all_states().items():
+            print(f"  {pane_id[:8]} | {state['status']:15} | {state['source']:12}")
+        print("=" * 60 + "\n")
 
     def print_history(self, pane_id: str) -> None:
         """打印 pane 的状态历史（调试用）"""
-        self._state_store.print_history(pane_id)
+        machine = self._state_manager.get_machine(pane_id)
+        if not machine:
+            print(f"[HookManager] No state for {pane_id[:8]}")
+            return
+
+        print("\n" + "=" * 60)
+        print(f"[HookManager] History for {pane_id[:8]}")
+        print("=" * 60)
+        print(machine.get_history_log())
+        print("=" * 60 + "\n")
 
     def get_history(self, pane_id: str) -> list:
         """获取 pane 的状态历史"""
-        state = self._state_store.get(pane_id)
-        return state.history
+        machine = self._state_manager.get_machine(pane_id)
+        return machine.history if machine else []
+
+    # === 内部访问（用于集成）===
+
+    @property
+    def state_manager(self) -> StateManager:
+        """获取 StateManager（用于高级集成）"""
+        return self._state_manager
+
+    @property
+    def timer(self) -> "Timer | None":
+        """获取 Timer"""
+        return self._timer
