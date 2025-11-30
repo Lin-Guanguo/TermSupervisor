@@ -4,7 +4,7 @@ from typing import Union
 
 import iterm2
 
-from termsupervisor.models import PaneInfo, TabInfo, WindowInfo, LayoutData
+from termsupervisor.iterm.models import PaneInfo, TabInfo, WindowInfo, LayoutData
 from termsupervisor.iterm.naming import get_name
 
 

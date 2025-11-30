@@ -41,7 +41,9 @@ class TestShellTransitions:
 
         result = machine.process(event)
 
-        assert result is True
+        assert result is not None  # StateChange 返回
+        assert isinstance(result, StateChange)
+        assert result.new_status == TaskStatus.RUNNING
         assert machine.status == TaskStatus.RUNNING
         assert machine.source == "shell"
         assert machine.description == "执行: ls -la"
@@ -69,7 +71,7 @@ class TestShellTransitions:
 
         result = machine.process(event)
 
-        assert result is True
+        assert result is not None
         assert machine.status == TaskStatus.DONE
         assert machine.source == "shell"
 
@@ -93,7 +95,7 @@ class TestShellTransitions:
 
         result = machine.process(event)
 
-        assert result is True
+        assert result is not None
         assert machine.status == TaskStatus.FAILED
         assert "exit=1" in machine.description
 
@@ -119,7 +121,7 @@ class TestShellTransitions:
 
         result = machine.process(event)
 
-        assert result is False
+        assert result is None
         assert machine.status == TaskStatus.RUNNING  # 状态未变
 
 
@@ -137,7 +139,7 @@ class TestClaudeCodeTransitions:
 
         result = machine.process(event)
 
-        assert result is True
+        assert result is not None
         assert machine.status == TaskStatus.RUNNING
         assert machine.source == "claude-code"
 
@@ -153,7 +155,7 @@ class TestClaudeCodeTransitions:
 
         result = machine.process(event)
 
-        assert result is True
+        assert result is not None
         assert machine.status == TaskStatus.RUNNING
         assert "Read" in machine.description
 
@@ -203,7 +205,7 @@ class TestClaudeCodeTransitions:
 
         result = machine.process(event)
 
-        assert result is True
+        assert result is not None
         assert machine.status == TaskStatus.DONE
 
     def test_permission_prompt(self, machine):
@@ -217,7 +219,7 @@ class TestClaudeCodeTransitions:
 
         result = machine.process(event)
 
-        assert result is True
+        assert result is not None
         assert machine.status == TaskStatus.WAITING_APPROVAL
 
     def test_idle_prompt(self, machine):
@@ -238,7 +240,7 @@ class TestClaudeCodeTransitions:
 
         result = machine.process(event)
 
-        assert result is True
+        assert result is not None
         assert machine.status == TaskStatus.IDLE
 
     def test_session_end(self, machine):
@@ -259,7 +261,7 @@ class TestClaudeCodeTransitions:
 
         result = machine.process(event)
 
-        assert result is True
+        assert result is not None
         assert machine.status == TaskStatus.IDLE
 
 
@@ -284,7 +286,7 @@ class TestUserTransitions:
 
         result = machine.process(event)
 
-        assert result is True
+        assert result is not None
         assert machine.status == TaskStatus.IDLE
         assert machine.source == "user"
 
@@ -316,7 +318,7 @@ class TestUserTransitions:
 
         result = machine.process(event)
 
-        assert result is True
+        assert result is not None
         assert machine.status == TaskStatus.IDLE
 
 
@@ -344,7 +346,7 @@ class TestContentTransitions:
 
         result = machine.process(event)
 
-        assert result is True
+        assert result is not None
         assert machine.status == TaskStatus.RUNNING
         # source 应该保持原来的 claude-code
         assert machine.source == original_source
@@ -361,7 +363,7 @@ class TestContentTransitions:
 
         result = machine.process(event)
 
-        assert result is False
+        assert result is None
         assert machine.status == TaskStatus.IDLE
 
 
@@ -389,7 +391,7 @@ class TestTimerTransitions:
 
         result = machine.process(event)
 
-        assert result is True
+        assert result is not None
         assert machine.status == TaskStatus.LONG_RUNNING
         # source 保持不变
         assert machine.source == original_source
@@ -415,7 +417,7 @@ class TestGenerationCheck:
 
         result = machine.process(event)
 
-        assert result is False
+        assert result is None
         assert machine.status == TaskStatus.IDLE  # 状态未变
 
 
@@ -532,46 +534,3 @@ class TestSerialization:
 
         # 持久化历史应该限制在 5 条（STATE_HISTORY_PERSIST_LENGTH）
         assert len(data["history"]) <= 5
-
-
-class TestCallback:
-    """回调测试"""
-
-    def test_on_state_change_callback_called(self, machine):
-        """状态变更时调用回调"""
-        changes = []
-
-        def callback(change: StateChange):
-            changes.append(change)
-
-        machine.set_on_state_change(callback)
-
-        machine.process(HookEvent(
-            source="shell",
-            pane_id="test-pane-123",
-            event_type="command_start",
-            data={"command": "ls"},
-            pane_generation=1,
-        ))
-
-        assert len(changes) == 1
-        assert changes[0].old_status == TaskStatus.IDLE
-        assert changes[0].new_status == TaskStatus.RUNNING
-
-    def test_callback_not_called_on_failed_transition(self, machine):
-        """转换失败时不调用回调"""
-        changes = []
-
-        def callback(change: StateChange):
-            changes.append(change)
-
-        machine.set_on_state_change(callback)
-
-        machine.process(HookEvent(
-            source="content",
-            pane_id="test-pane-123",
-            event_type="changed",
-            pane_generation=1,
-        ))
-
-        assert len(changes) == 0

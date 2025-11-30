@@ -1,69 +1,15 @@
-"""数据模型定义"""
+"""内容变化队列
 
-from dataclasses import dataclass, field, asdict
+用于 Supervisor 内容节流的数据结构。
+"""
+
+from dataclasses import dataclass, field
 from collections import deque
 from datetime import datetime
-from typing import Callable, Awaitable, TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List
 
 if TYPE_CHECKING:
-    from .analysis.base import TaskStatus
-
-
-@dataclass
-class PaneInfo:
-    """Pane 信息"""
-    session_id: str
-    name: str
-    index: int
-    x: float
-    y: float
-    width: float
-    height: float
-
-
-@dataclass
-class TabInfo:
-    """Tab 信息"""
-    tab_id: str
-    name: str
-    panes: list[PaneInfo] = field(default_factory=list)
-
-
-@dataclass
-class WindowInfo:
-    """Window 信息"""
-    window_id: str
-    name: str
-    x: float
-    y: float
-    width: float
-    height: float
-    tabs: list[TabInfo] = field(default_factory=list)
-
-
-@dataclass
-class LayoutData:
-    """完整布局数据"""
-    windows: list[WindowInfo] = field(default_factory=list)
-    updated_sessions: list[str] = field(default_factory=list)
-    active_session_id: str | None = None  # 当前 focus 的 session
-
-    def to_dict(self) -> dict:
-        """转换为字典"""
-        return asdict(self)
-
-
-@dataclass
-class PaneSnapshot:
-    """Pane 内容快照"""
-    session_id: str
-    index: int
-    content: str
-    updated_at: datetime = field(default_factory=datetime.now)
-
-
-# 更新回调类型
-UpdateCallback = Callable[[LayoutData], Awaitable[None]]
+    from ..pane import TaskStatus
 
 
 @dataclass

@@ -4,20 +4,26 @@ import asyncio
 import difflib
 import logging
 from datetime import datetime
-
-import iterm2
+from typing import TYPE_CHECKING
 
 from termsupervisor import config
-from termsupervisor.models import LayoutData, PaneSnapshot, UpdateCallback, PaneChange, PaneHistory, PaneChangeQueue
-from termsupervisor.iterm import get_layout, normalize_session_id, session_id_match
-from termsupervisor.analysis import create_analyzer, get_hook_manager, ContentCleaner
+from termsupervisor.iterm.models import LayoutData, PaneSnapshot, UpdateCallback
+from termsupervisor.analysis.change_queue import PaneChange, PaneHistory, PaneChangeQueue
+from termsupervisor.iterm import get_layout, normalize_session_id, session_id_match, ITerm2Client
+from termsupervisor.analysis import ContentCleaner
 from termsupervisor.pane import TaskStatus
+
+if TYPE_CHECKING:
+    from termsupervisor.hooks.manager import HookManager
 
 logger = logging.getLogger(__name__)
 
 
 class TermSupervisor:
-    """iTerm2 终端监控服务"""
+    """iTerm2 终端监控服务
+
+    所有 iTerm2 操作通过 ITerm2Client 进行，不直接调用 iterm2 API。
+    """
 
     def __init__(
         self,
@@ -25,6 +31,8 @@ class TermSupervisor:
         exclude_names: list[str] | None = None,
         debug: bool = False,
         min_changed_lines: int = 1,
+        hook_manager: "HookManager | None" = None,
+        iterm_client: ITerm2Client | None = None,
     ):
         self.interval = interval
         self.exclude_names = exclude_names or []
@@ -35,12 +43,35 @@ class TermSupervisor:
         self._callbacks: list[UpdateCallback] = []
         self.layout: LayoutData = LayoutData()
 
-        # 状态分析
+        # 状态分析 (legacy, 仅保留 history 用于变化记录)
         self.pane_histories: dict[str, PaneHistory] = {}
-        self.analyzer = create_analyzer()  # 返回空分析器，状态由 HookManager 管理
+
+        # 依赖注入
+        self._hook_manager = hook_manager
+        self._iterm_client = iterm_client
 
         # 变化队列 (用于智能节流)
         self.pane_queues: dict[str, PaneChangeQueue] = {}
+
+    def set_hook_manager(self, hook_manager: "HookManager") -> None:
+        """设置 HookManager（用于状态获取和事件发送）"""
+        self._hook_manager = hook_manager
+
+    def set_iterm_client(self, client: ITerm2Client) -> None:
+        """设置 ITerm2Client"""
+        self._iterm_client = client
+
+    def _get_hook_manager(self) -> "HookManager":
+        """获取 HookManager"""
+        if self._hook_manager is None:
+            raise RuntimeError("HookManager not set. Call set_hook_manager() first.")
+        return self._hook_manager
+
+    def _get_iterm_client(self) -> ITerm2Client:
+        """获取 ITerm2Client"""
+        if self._iterm_client is None:
+            raise RuntimeError("ITerm2Client not set. Call set_iterm_client() first.")
+        return self._iterm_client
 
     def on_update(self, callback: UpdateCallback):
         """注册更新回调"""
@@ -118,36 +149,24 @@ class TermSupervisor:
             )
         return self.pane_histories[session_id]
 
-    @staticmethod
-    def _normalize_content(content: str) -> str:
-        """标准化内容"""
-        content = content.replace("\xa0", " ")
-        return "\n".join(line.rstrip() for line in content.split("\n"))
-
-    async def _get_session_content(self, session: iterm2.Session) -> str:
-        """获取 session 的屏幕内容"""
-        try:
-            contents = await session.async_get_screen_contents()
-            lines = [contents.line(i).string for i in range(contents.number_of_lines)]
-            return self._normalize_content("\n".join(lines))
-        except Exception as e:
-            return f"[Error: {e}]"
-
     def _get_or_create_queue(self, session_id: str) -> PaneChangeQueue:
         """获取或创建 PaneChangeQueue"""
         if session_id not in self.pane_queues:
             self.pane_queues[session_id] = PaneChangeQueue(session_id)
         return self.pane_queues[session_id]
 
-    async def check_updates(self, connection: iterm2.Connection) -> list[str]:
+    async def check_updates(self) -> list[str]:
         """检查所有 pane 的更新
 
         使用 PaneChangeQueue 进行智能节流：
         - 每秒读取内容，更新队列
         - 根据变化大小决定是否触发页面刷新
         - 大变化时记录到队列历史
+
+        注意：需要先调用 set_iterm_client() 设置客户端。
         """
-        app = await iterm2.async_get_app(connection)
+        client = self._get_iterm_client()
+        app = await client.get_app()
         self.layout = await get_layout(app, self.exclude_names)
         now = datetime.now()
         updated_sessions = []
@@ -161,7 +180,7 @@ class TermSupervisor:
                     if not session:
                         continue
 
-                    content = await self._get_session_content(session)
+                    content = await client.get_session_content(session)
 
                     # 获取或创建变化队列
                     queue = self._get_or_create_queue(pane.session_id)
@@ -192,12 +211,14 @@ class TermSupervisor:
                             panes_to_analyze.append(history)
 
                             # 通知 HookManager 内容变化（触发 WAITING_APPROVAL 兜底恢复）
-                            hook_manager = get_hook_manager()
+                            hook_manager = self._get_hook_manager()
                             content_hash = ContentCleaner.content_hash(content)
-                            await hook_manager.process_content_changed(
-                                pane.session_id,
-                                content=content,
-                                content_hash=content_hash,
+                            await hook_manager.emit_event(
+                                source="content",
+                                pane_id=pane.session_id,
+                                event_type="changed",
+                                data={"content": content, "content_hash": content_hash},
+                                log=False,  # 内容事件太频繁，禁用日志
                             )
                     else:
                         # 新发现的 pane
@@ -223,22 +244,13 @@ class TermSupervisor:
         return updated_sessions
 
     async def _analyze_panes(self, panes: list[PaneHistory]):
-        """分析需要分析的 pane 状态"""
-        for pane in panes:
-            if self.analyzer.should_analyze(pane):
-                try:
-                    old_status = pane.current_status
-                    new_status = await self.analyzer.analyze(pane)
+        """分析需要分析的 pane 状态
 
-                    # 状态变化时记录日志
-                    if old_status != new_status:
-                        self._debug(f"Pane {pane.session_id} 状态: {old_status} -> {new_status.value}")
-
-                        # 需要通知的状态变化
-                        if new_status.needs_notification:
-                            print(f"[状态变化] {pane.pane_name}: {new_status.value} - {pane.status_reason}")
-                except Exception as e:
-                    logger.error(f"分析 pane {pane.session_id} 失败: {e}")
+        注意：状态分析已由 HookManager 接管，此方法为空实现。
+        保留方法签名以保持接口稳定。
+        """
+        # 状态分析现在由 HookManager 处理，不再需要本地分析
+        pass
 
     def _log_update(self, now: datetime, pane, changed_lines: list[str]):
         """记录更新日志"""
@@ -272,8 +284,11 @@ class TermSupervisor:
             if session_id in self.pane_queues:
                 del self.pane_queues[session_id]
 
-    async def run(self, connection: iterm2.Connection):
-        """运行监控服务"""
+    async def run(self):
+        """运行监控服务
+
+        注意：需要先调用 set_iterm_client() 设置客户端。
+        """
         self._running = True
         poll_interval = config.POLL_INTERVAL
         print(f"TermSupervisor 已启动，轮询间隔: {poll_interval}s")
@@ -281,7 +296,7 @@ class TermSupervisor:
 
         while self._running:
             try:
-                await self.check_updates(connection)
+                await self.check_updates()
                 await self._notify_callbacks()
                 await asyncio.sleep(poll_interval)
             except asyncio.CancelledError:
@@ -327,7 +342,7 @@ class TermSupervisor:
         data = self.layout.to_dict()
 
         # 从 HookManager 获取状态信息
-        hook_manager = get_hook_manager()
+        hook_manager = self._get_hook_manager()
         pane_statuses = {}
 
         # 遍历当前布局中的所有 pane

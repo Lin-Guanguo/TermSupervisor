@@ -63,5 +63,13 @@ QUEUE_REFRESH_LINES = 5  # 中等变化阈值，触发页面刷新
 QUEUE_NEW_RECORD_LINES = 20  # 大变化阈值
 QUEUE_FLUSH_TIMEOUT = 10.0  # 小变化兜底刷新时间（秒）
 
+# === 日志配置 ===
+LOG_LEVEL = os.environ.get("TERMSUPERVISOR_LOG_LEVEL", "INFO")  # 日志级别
+LOG_MAX_CMD_LEN = 120  # shell 命令日志截断长度
+MASK_COMMANDS = False  # 是否完全隐藏命令内容（隐私模式）
+
+# === 指标配置 ===
+METRICS_ENABLED = True  # 是否启用指标收集
+
 # 旧配置别名
 INTERVAL = POLL_INTERVAL

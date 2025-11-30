@@ -103,7 +103,7 @@ class StateManager:
         # 初始化 generation
         self._pane_generations[pane_id] = 1
 
-        # 创建状态机
+        # 创建状态机（不再设置回调，StateManager 直接调用）
         machine = PaneStateMachine(
             pane_id=pane_id,
             pane_generation=self._pane_generations[pane_id],
@@ -116,12 +116,7 @@ class StateManager:
             focus_checker=self._focus_checker,
         )
 
-        # 绑定回调：状态机 → Pane
-        machine.set_on_state_change(
-            lambda change: self._on_machine_state_change(pane_id, change)
-        )
-
-        # 绑定回调：Pane → 外部
+        # 绑定回调：Pane → 外部（保留，用于通知 HookManager/Web）
         pane.set_on_display_change(
             lambda state: self._on_pane_display_change(pane_id, state)
         )
@@ -135,12 +130,6 @@ class StateManager:
         self._queues[pane_id] = queue
 
         logger.debug(f"[StateManager] Created pane: {pane_id[:8]}")
-
-    def _on_machine_state_change(self, pane_id: str, change: StateChange) -> None:
-        """状态机状态变化回调"""
-        pane = self._panes.get(pane_id)
-        if pane:
-            pane.handle_state_change(change)
 
     def _on_pane_display_change(self, pane_id: str, state: DisplayState) -> None:
         """Pane 显示变化回调"""
@@ -216,7 +205,7 @@ class StateManager:
             event: Hook 事件
 
         Returns:
-            是否成功处理
+            是否成功处理（发生了状态变化）
         """
         machine = self._machines.get(pane_id)
         pane = self._panes.get(pane_id)
@@ -236,12 +225,20 @@ class StateManager:
             # 2. 如果是 WAITING_APPROVAL，尝试兜底恢复
             if machine.status == TaskStatus.WAITING_APPROVAL:
                 logger.debug(f"[StateManager:{pane_short}] Content fallback: WAITING → RUNNING")
-                return machine.process(event)
+                change = machine.process(event)
+                if change:
+                    # 直接调用 Pane（不再依赖回调）
+                    pane.handle_state_change(change)
+                return change is not None
 
             return True
 
-        # 其他事件直接转发给状态机
-        return machine.process(event)
+        # 其他事件转发给状态机
+        change = machine.process(event)
+        if change:
+            # 直接调用 Pane（不再依赖回调）
+            pane.handle_state_change(change)
+        return change is not None
 
     # === LONG_RUNNING 检查 ===
 
@@ -269,7 +266,12 @@ class StateManager:
                     pane_generation=machine.pane_generation,
                 )
 
-                if machine.process(event):
+                change = machine.process(event)
+                if change:
+                    # 直接调用 Pane
+                    pane = self._panes.get(pane_id)
+                    if pane:
+                        pane.handle_state_change(change)
                     triggered.append(pane_id)
 
         return triggered
@@ -375,16 +377,11 @@ class StateManager:
 
         machines_data, panes_data = result
 
-        # 恢复状态机
+        # 恢复状态机（不再设置回调，StateManager 直接调用）
         for pane_id, data in machines_data.items():
             machine = PaneStateMachine.from_dict(data)
             self._machines[pane_id] = machine
             self._pane_generations[pane_id] = machine.pane_generation
-
-            # 重新绑定回调
-            machine.set_on_state_change(
-                lambda change, pid=pane_id: self._on_machine_state_change(pid, change)
-            )
 
         # 恢复 Pane
         for pane_id, data in panes_data.items():

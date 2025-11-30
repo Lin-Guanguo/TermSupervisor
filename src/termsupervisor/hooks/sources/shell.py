@@ -1,17 +1,57 @@
-"""Shell Hook 源 - 基于 iTerm2 PromptMonitor"""
+"""Shell Hook 源 - 基于 iTerm2 PromptMonitor
 
-import logging
+负责：
+- 接收 iTerm2 PromptMonitor 命令事件
+- 清洗命令字符串（去除 NUL/newlines，截断）
+- 通过 emit_event 发送事件（由 HookManager 处理日志/指标）
+"""
+
+import re
 from typing import TYPE_CHECKING
 
 import iterm2
 
 from ..sources.base import HookSource
 from ..prompt_monitor import PromptMonitorManager
+from ...telemetry import get_logger
+from ...config import LOG_MAX_CMD_LEN
 
 if TYPE_CHECKING:
     from ..manager import HookManager
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
+
+# 命令清洗配置
+_CMD_TRUNCATE_LEN = LOG_MAX_CMD_LEN  # 从 config.py 读取，默认 120
+
+
+def sanitize_command(command: str, max_len: int = _CMD_TRUNCATE_LEN) -> str:
+    """清洗命令字符串
+
+    - 移除 NUL 字符
+    - 将换行替换为空格
+    - 折叠连续空白
+    - 截断到 max_len
+
+    Args:
+        command: 原始命令
+        max_len: 最大长度
+
+    Returns:
+        清洗后的命令
+    """
+    if not command:
+        return ""
+    # 移除 NUL
+    cmd = command.replace("\x00", "")
+    # 换行替换为空格
+    cmd = cmd.replace("\n", " ").replace("\r", " ")
+    # 折叠连续空白
+    cmd = re.sub(r"\s+", " ", cmd).strip()
+    # 截断
+    if len(cmd) > max_len:
+        return cmd[:max_len - 3] + "..."
+    return cmd
 
 
 class ShellHookSource(HookSource):
@@ -68,15 +108,27 @@ class ShellHookSource(HookSource):
             info: 命令字符串(start) 或 退出码(end)
         """
         if event_type == "command_start":
-            # 命令开始
-            command = str(info) if info else ""
-            self._current_commands[session_id] = command
+            # 命令开始 - 清洗命令后发送
+            raw_command = str(info) if info else ""
+            sanitized = sanitize_command(raw_command)
+            self._current_commands[session_id] = raw_command  # 保留原始命令供内部使用
 
-            await self.manager.process_shell_command_start(session_id, command)
+            # 使用 emit_event 发送，Manager 负责日志/指标
+            await self.manager.emit_event(
+                source="shell",
+                pane_id=session_id,
+                event_type="command_start",
+                data={"command": sanitized},  # 传递清洗后的命令
+            )
 
         elif event_type == "command_end":
             # 命令结束
             exit_code = int(info) if info else 0
             self._current_commands.pop(session_id, "")
 
-            await self.manager.process_shell_command_end(session_id, exit_code)
+            await self.manager.emit_event(
+                source="shell",
+                pane_id=session_id,
+                event_type="command_end",
+                data={"exit_code": exit_code},
+            )

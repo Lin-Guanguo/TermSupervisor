@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Any, Coroutine
 
 from .telemetry import get_logger, metrics
+from .config import METRICS_ENABLED
 
 logger = get_logger(__name__)
 
@@ -258,7 +259,8 @@ class Timer:
                 await result
         except Exception as e:
             logger.error(f"[Timer] Task '{name}' failed: {e}")
-            metrics.inc("timer.errors", {"task": name})
+            if METRICS_ENABLED:
+                metrics.inc("timer.errors", {"task": name})
 
     # === 状态查询（用于测试）===
 

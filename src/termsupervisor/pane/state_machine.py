@@ -9,9 +9,7 @@
 
 import itertools
 from collections import deque
-from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Callable, Any
 
 from ..telemetry import get_logger, metrics
 from ..config import STATE_HISTORY_MAX_LENGTH, STATE_HISTORY_PERSIST_LENGTH
@@ -22,7 +20,7 @@ from .types import (
     StateHistoryEntry,
     StateSnapshot,
 )
-from .transitions import TRANSITION_RULES, find_matching_rules
+from .transitions import find_matching_rules
 
 logger = get_logger(__name__)
 
@@ -33,10 +31,6 @@ _state_id_counter = itertools.count(1)
 def _next_state_id() -> int:
     """获取下一个 state_id（自增）"""
     return next(_state_id_counter)
-
-
-# 状态变更回调类型
-OnStateChangeCallback = Callable[[StateChange], Any]
 
 
 class PaneStateMachine:
@@ -74,9 +68,6 @@ class PaneStateMachine:
         # 环形历史队列
         self._history: deque[StateHistoryEntry] = deque(maxlen=STATE_HISTORY_MAX_LENGTH)
 
-        # 状态变更回调
-        self._on_state_change: OnStateChangeCallback | None = None
-
     # === 属性 ===
 
     @property
@@ -107,15 +98,9 @@ class PaneStateMachine:
     def history(self) -> list[StateHistoryEntry]:
         return list(self._history)
 
-    # === 回调 ===
-
-    def set_on_state_change(self, callback: OnStateChangeCallback | None) -> None:
-        """设置状态变更回调"""
-        self._on_state_change = callback
-
     # === 核心方法 ===
 
-    def process(self, event: HookEvent) -> bool:
+    def process(self, event: HookEvent) -> StateChange | None:
         """处理事件
 
         根据流转表匹配规则，执行状态转换。
@@ -124,7 +109,7 @@ class PaneStateMachine:
             event: Hook 事件
 
         Returns:
-            是否发生状态转换
+            StateChange 对象（发生转换时），或 None（无转换）
         """
         signal = event.signal
         pane_short = self.pane_id[:8]
@@ -137,7 +122,7 @@ class PaneStateMachine:
             )
             metrics.inc("transition.stale_generation", {"pane": pane_short})
             self._add_history(signal, self._status, self._status, success=False)
-            return False
+            return None
 
         # 2. 查找所有可能匹配的规则
         rules = find_matching_rules(signal, self._status, self._source)
@@ -145,7 +130,7 @@ class PaneStateMachine:
         if not rules:
             logger.debug(f"[SM:{pane_short}] No rule matched for {signal}")
             self._add_history(signal, self._status, self._status, success=False)
-            return False
+            return None
 
         # 3. 构建状态快照
         snapshot = StateSnapshot(
@@ -168,7 +153,7 @@ class PaneStateMachine:
             logger.debug(f"[SM:{pane_short}] All predicates failed for {signal}")
             self._add_history(signal, self._status, self._status, success=False)
             metrics.inc("transition.predicate_fail", {"pane": pane_short})
-            return False
+            return None
 
         # 5. 执行状态转换
         old_status = self._status
@@ -212,21 +197,19 @@ class PaneStateMachine:
             f"signal={signal} | source={new_source} | state_id={self._state_id}"
         )
 
-        # 6. 触发回调
-        if self._on_state_change:
-            change = StateChange(
-                old_status=old_status,
-                new_status=new_status,
-                old_source=old_source,
-                new_source=new_source,
-                description=new_description,
-                state_id=self._state_id,
-                started_at=self._started_at,
-                running_duration=running_duration,
-            )
-            self._on_state_change(change)
+        # 6. 构建状态变化对象
+        change = StateChange(
+            old_status=old_status,
+            new_status=new_status,
+            old_source=old_source,
+            new_source=new_source,
+            description=new_description,
+            state_id=self._state_id,
+            started_at=self._started_at,
+            running_duration=running_duration,
+        )
 
-        return True
+        return change
 
     def increment_generation(self) -> int:
         """递增 pane_generation

@@ -1,18 +1,24 @@
-"""iTerm2 Hook 源 - 监控 Focus 事件"""
+"""iTerm2 Hook 源 - 监控 Focus 事件
+
+负责：
+- 监听 iTerm2 FocusMonitor 事件
+- 防抖处理（稳定 N 秒后才发送）
+- 通过 emit_event 发送事件（由 HookManager 处理日志/指标）
+"""
 
 import asyncio
-import logging
 from typing import TYPE_CHECKING
 
 import iterm2
 
 from ..sources.base import HookSource
 from ...config import FOCUS_DEBOUNCE_SECONDS
+from ...telemetry import get_logger
 
 if TYPE_CHECKING:
     from ..manager import HookManager
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ItermHookSource(HookSource):
@@ -129,8 +135,13 @@ class ItermHookSource(HookSource):
             if self._last_focus_session == session_id:
                 # 更新当前 focus（用于通知抑制判断）
                 self._current_focus_session = session_id
-                logger.debug(f"[ItermHook] 发送 focus 事件: {session_id}")
-                await self.manager.process_user_focus(session_id)
+
+                # 使用 emit_event 发送，Manager 负责日志/指标
+                await self.manager.emit_event(
+                    source="iterm",
+                    pane_id=session_id,
+                    event_type="focus",
+                )
 
         except asyncio.CancelledError:
             # 被新的 focus 取消，正常行为

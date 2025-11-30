@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..models import PaneHistory, PaneChange
+    from .change_queue import PaneHistory, PaneChange
 
 # 思考符号（Claude Code 等 AI 工具）
 THINKING_SYMBOLS = {

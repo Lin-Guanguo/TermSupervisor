@@ -297,3 +297,162 @@ class TestLongRunning:
 
         assert "test-pane" in triggered
         assert manager.get_status("test-pane") == TaskStatus.LONG_RUNNING
+
+
+class TestEmitEvent:
+    """emit_event 统一入口测试"""
+
+    async def test_emit_event_basic(self, manager):
+        """emit_event 基本功能"""
+        result = await manager.emit_event(
+            source="shell",
+            pane_id="test-pane",
+            event_type="command_start",
+            data={"command": "test"},
+        )
+        assert result is True
+        assert manager.get_status("test-pane") == TaskStatus.RUNNING
+
+    async def test_emit_event_metrics(self, manager):
+        """emit_event 递增指标"""
+        await manager.emit_event(
+            source="shell",
+            pane_id="test-pane",
+            event_type="command_start",
+            data={"command": "ls"},
+        )
+        count = metrics.get_counter(
+            "hooks.events_total",
+            labels={"source": "shell", "event_type": "command_start"},
+        )
+        assert count >= 1
+
+    async def test_emit_event_no_log(self, manager):
+        """emit_event log=False 不记录日志"""
+        # 这主要验证不抛异常，日志禁用由 log=False 控制
+        result = await manager.emit_event(
+            source="content",
+            pane_id="test-pane",
+            event_type="changed",
+            data={},
+            log=False,
+        )
+        assert result is True
+
+    async def test_emit_event_custom_log_level(self, manager):
+        """emit_event 自定义日志级别"""
+        import logging
+        result = await manager.emit_event(
+            source="shell",
+            pane_id="test-pane",
+            event_type="command_start",
+            data={"command": "test"},
+            log_level=logging.DEBUG,
+        )
+        assert result is True
+
+    async def test_process_methods_delegate_to_emit_event(self, manager):
+        """process_* 方法委托给 emit_event"""
+        # 验证指标累加证明确实走了 emit_event
+        await manager.process_shell_command_start("pane-1", "ls")
+        await manager.process_shell_command_end("pane-1", 0)
+        await manager.process_claude_code_event("pane-2", "SessionStart")
+        await manager.process_user_focus("pane-3")
+        await manager.process_user_click("pane-4")
+        await manager.process_content_changed("pane-5", "content", "hash")
+
+        # 检查指标被记录
+        shell_start = metrics.get_counter(
+            "hooks.events_total",
+            labels={"source": "shell", "event_type": "command_start"},
+        )
+        shell_end = metrics.get_counter(
+            "hooks.events_total",
+            labels={"source": "shell", "event_type": "command_end"},
+        )
+        claude = metrics.get_counter(
+            "hooks.events_total",
+            labels={"source": "claude-code", "event_type": "SessionStart"},
+        )
+        iterm = metrics.get_counter(
+            "hooks.events_total",
+            labels={"source": "iterm", "event_type": "focus"},
+        )
+        frontend = metrics.get_counter(
+            "hooks.events_total",
+            labels={"source": "frontend", "event_type": "click_pane"},
+        )
+        content = metrics.get_counter(
+            "hooks.events_total",
+            labels={"source": "content", "event_type": "changed"},
+        )
+
+        assert shell_start >= 1
+        assert shell_end >= 1
+        assert claude >= 1
+        assert iterm >= 1
+        assert frontend >= 1
+        assert content >= 1
+
+
+class TestSanitization:
+    """命令清洗测试"""
+
+    def test_sanitize_command_basic(self):
+        """基本清洗"""
+        from termsupervisor.hooks.sources.shell import sanitize_command
+
+        assert sanitize_command("ls -la") == "ls -la"
+        assert sanitize_command("") == ""
+
+    def test_sanitize_command_removes_nul(self):
+        """移除 NUL 字符"""
+        from termsupervisor.hooks.sources.shell import sanitize_command
+
+        # NUL 字符被直接移除（不替换为空格）
+        assert sanitize_command("ls\x00la") == "lsla"
+        assert sanitize_command("a\x00b\x00c") == "abc"
+
+    def test_sanitize_command_replaces_newlines(self):
+        """换行替换为空格"""
+        from termsupervisor.hooks.sources.shell import sanitize_command
+
+        assert sanitize_command("line1\nline2") == "line1 line2"
+        assert sanitize_command("line1\r\nline2") == "line1 line2"
+
+    def test_sanitize_command_collapses_whitespace(self):
+        """折叠连续空白"""
+        from termsupervisor.hooks.sources.shell import sanitize_command
+
+        assert sanitize_command("ls   -la    foo") == "ls -la foo"
+
+    def test_sanitize_command_truncates(self):
+        """截断长命令"""
+        from termsupervisor.hooks.sources.shell import sanitize_command
+
+        long_cmd = "a" * 200
+        result = sanitize_command(long_cmd, max_len=50)
+        assert len(result) == 50
+        assert result.endswith("...")
+
+
+class TestClaudeEventNormalization:
+    """Claude 事件类型规范化测试"""
+
+    def test_normalize_claude_event_type(self):
+        """规范化 Claude 事件类型"""
+        from termsupervisor.hooks.sources.claude_code import normalize_claude_event_type
+
+        assert normalize_claude_event_type("stop") == "Stop"
+        assert normalize_claude_event_type("STOP") == "Stop"
+        assert normalize_claude_event_type("pre_tool") == "PreToolUse"
+        assert normalize_claude_event_type("pre_tool_use") == "PreToolUse"
+        assert normalize_claude_event_type("session_start") == "SessionStart"
+        assert normalize_claude_event_type("permission_prompt") == "Notification:permission_prompt"
+
+    def test_normalize_claude_event_type_passthrough(self):
+        """未知事件类型直接透传"""
+        from termsupervisor.hooks.sources.claude_code import normalize_claude_event_type
+
+        assert normalize_claude_event_type("CustomEvent") == "CustomEvent"
+        assert normalize_claude_event_type("UnknownEvent") == "UnknownEvent"

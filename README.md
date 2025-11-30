@@ -78,7 +78,8 @@ src/termsupervisor/
 ├── telemetry.py            # Logger + in-memory metrics facade
 ├── timer.py                # Interval/delay scheduler
 ├── supervisor.py           # Polling + content.changed emission + layout mirror
-├── models.py               # Layout + legacy PaneChangeQueue
+├── runtime/
+│   └── bootstrap.py        # Centralized component construction
 ├── pane/
 │   ├── manager.py          # StateManager (per-pane ActorQueue, LONG_RUNNING)
 │   ├── state_machine.py    # Transition processing + history
@@ -90,8 +91,8 @@ src/termsupervisor/
 ├── hooks/
 │   ├── manager.py          # HookManager facade (normalize/enqueue)
 │   ├── receiver.py         # HTTP /api/hook endpoint
-│   ├── prompt_monitor.py   # iTerm2 PromptMonitor wrapper
-│   └── sources/            # Shell, Claude Code, iTerm focus debounce
+│   └── sources/            # Shell, Claude Code, iTerm focus debounce, PromptMonitor
+│       └── prompt_monitor.py   # iTerm2 PromptMonitor wrapper
 ├── analysis/               # ContentCleaner + compatibility analyzer
 ├── iterm/                  # Layout traversal + client helpers
 ├── render/                 # SVG renderer

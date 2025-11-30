@@ -1,21 +1,35 @@
 """HookManager - Hook 系统门面
 
 统一入口：
+- emit_event: 统一事件入口（规范化 + 日志 + 指标 + 入队）
 - 组装 HookEvent（补全 generation/time/signal）
 - 调用 StateManager 处理事件
 - 提供便捷 API
+
+Sources 通过 emit_event 发送事件，Manager 负责：
+1. 规范化事件（补全 generation/timestamp/signal）
+2. 可选日志记录
+3. 指标计数（hooks.events_total）
+4. 入队处理
 """
 
+import logging
 from datetime import datetime
 from typing import Callable, Any, TYPE_CHECKING
 
 from ..telemetry import get_logger, metrics
 from ..pane import TaskStatus, HookEvent, StateManager, DisplayState
+from ..config import METRICS_ENABLED
 
 if TYPE_CHECKING:
     from ..timer import Timer
 
 logger = get_logger(__name__)
+
+# 日志级别常量
+LOG_DEBUG = logging.DEBUG
+LOG_INFO = logging.INFO
+LOG_WARNING = logging.WARNING
 
 # 回调类型
 StatusChangeCallback = Callable[[str, TaskStatus, str, str, bool], Any]
@@ -141,29 +155,77 @@ class HookManager:
             return True
         return False
 
+    async def emit_event(
+        self,
+        source: str,
+        pane_id: str,
+        event_type: str,
+        data: dict | None = None,
+        *,
+        log: bool = True,
+        log_level: int = LOG_INFO,
+    ) -> bool:
+        """统一事件入口
+
+        Sources 通过此方法发送事件。Manager 负责：
+        1. 规范化事件（补全 generation/timestamp/signal）
+        2. 可选日志记录
+        3. 指标计数
+        4. 入队处理
+
+        Args:
+            source: 事件来源 (shell, claude-code, content, iterm, frontend, timer)
+            pane_id: pane 标识
+            event_type: 事件类型
+            data: 事件数据（可选）
+            log: 是否记录日志，默认 True
+            log_level: 日志级别，默认 INFO
+
+        Returns:
+            是否成功入队
+        """
+        # 1. 规范化事件
+        event = self._normalize_event(source, pane_id, event_type, data)
+
+        # 2. 可选日志
+        if log:
+            logger.log(log_level, event.format_log())
+
+        # 3. 指标计数（受 METRICS_ENABLED 控制）
+        if METRICS_ENABLED:
+            metrics.inc(
+                "hooks.events_total",
+                labels={"source": source, "event_type": event_type},
+            )
+
+        # 4. 入队处理
+        return await self.process_event(event)
+
     # === Shell 事件 ===
 
     async def process_shell_command_start(self, pane_id: str, command: str) -> bool:
-        """处理 shell 命令开始"""
-        event = self._normalize_event(
+        """处理 shell 命令开始
+
+        Note: 此方法为兼容层，内部委托给 emit_event。
+        """
+        return await self.emit_event(
             source="shell",
             pane_id=pane_id,
             event_type="command_start",
             data={"command": command},
         )
-        logger.info(event.format_log())
-        return await self.process_event(event)
 
     async def process_shell_command_end(self, pane_id: str, exit_code: int) -> bool:
-        """处理 shell 命令结束"""
-        event = self._normalize_event(
+        """处理 shell 命令结束
+
+        Note: 此方法为兼容层，内部委托给 emit_event。
+        """
+        return await self.emit_event(
             source="shell",
             pane_id=pane_id,
             event_type="command_end",
             data={"exit_code": exit_code},
         )
-        logger.info(event.format_log())
-        return await self.process_event(event)
 
     # === Claude Code 事件 ===
 
@@ -173,17 +235,18 @@ class HookManager:
         event_type: str,
         data: dict | None = None,
     ) -> bool:
-        """处理 Claude Code 事件"""
+        """处理 Claude Code 事件
+
+        Note: 此方法为兼容层，内部委托给 emit_event。
+        """
         # 规范化事件类型
         normalized_type = self._normalize_claude_event_type(event_type)
-        event = self._normalize_event(
+        return await self.emit_event(
             source="claude-code",
             pane_id=pane_id,
             event_type=normalized_type,
             data=data,
         )
-        logger.info(event.format_log())
-        return await self.process_event(event)
 
     def _normalize_claude_event_type(self, event_type: str) -> str:
         """规范化 Claude 事件类型"""
@@ -204,24 +267,26 @@ class HookManager:
     # === 用户事件 ===
 
     async def process_user_focus(self, pane_id: str) -> bool:
-        """处理用户 focus 事件"""
-        event = self._normalize_event(
+        """处理用户 focus 事件
+
+        Note: 此方法为兼容层，内部委托给 emit_event。
+        """
+        return await self.emit_event(
             source="iterm",
             pane_id=pane_id,
             event_type="focus",
         )
-        logger.info(event.format_log())
-        return await self.process_event(event)
 
     async def process_user_click(self, pane_id: str, click_type: str = "click_pane") -> bool:
-        """处理用户点击事件"""
-        event = self._normalize_event(
+        """处理用户点击事件
+
+        Note: 此方法为兼容层，内部委托给 emit_event。
+        """
+        return await self.emit_event(
             source="frontend",
             pane_id=pane_id,
             event_type=click_type,
         )
-        logger.info(event.format_log())
-        return await self.process_event(event)
 
     # === 内容事件 ===
 
@@ -231,27 +296,33 @@ class HookManager:
         content: str = "",
         content_hash: str = "",
     ) -> bool:
-        """处理内容变化事件"""
-        event = self._normalize_event(
+        """处理内容变化事件
+
+        Note: 此方法为兼容层，内部委托给 emit_event。
+        内容事件禁用日志（太频繁），但仍计数指标。
+        """
+        return await self.emit_event(
             source="content",
             pane_id=pane_id,
             event_type="changed",
             data={"content": content, "content_hash": content_hash},
+            log=False,  # 不记录日志（太频繁）
         )
-        # 不记录日志（太频繁）
-        return await self.process_event(event)
 
     # === Timer 事件 ===
 
     async def process_timer_check(self, pane_id: str, elapsed: str) -> bool:
-        """处理定时检查事件（通常由 tick_all 内部调用）"""
-        event = self._normalize_event(
+        """处理定时检查事件（通常由 tick_all 内部调用）
+
+        Note: 此方法为兼容层，内部委托给 emit_event。
+        """
+        return await self.emit_event(
             source="timer",
             pane_id=pane_id,
             event_type="check",
             data={"elapsed": elapsed},
+            log=False,  # Timer 事件由 StateManager 内部触发，无需额外日志
         )
-        return await self.process_event(event)
 
     def tick_all(self) -> list[str]:
         """检查所有 pane 的 LONG_RUNNING

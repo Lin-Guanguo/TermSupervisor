@@ -11,6 +11,7 @@ from termsupervisor.iterm import ITerm2Client
 from termsupervisor.iterm.utils import normalize_session_id
 from termsupervisor.supervisor import TermSupervisor
 from termsupervisor.web.server import WebServer
+from termsupervisor.runtime import bootstrap, RuntimeComponents
 
 logger = logging.getLogger(__name__)
 
@@ -23,30 +24,36 @@ def create_app(supervisor: TermSupervisor, iterm_client: ITerm2Client) -> WebSer
 async def setup_hook_system(
     server: WebServer,
     connection: iterm2.Connection
-) -> tuple:
+) -> RuntimeComponents:
     """设置 Hook 系统
 
-    Returns:
-        (hook_manager, shell_source, claude_code_source, iterm_source, timer)
-    """
-    from termsupervisor.analysis import get_hook_manager, get_timer
-    from termsupervisor.hooks import HookReceiver
-    from termsupervisor.hooks.sources.shell import ShellHookSource
-    from termsupervisor.hooks.sources.claude_code import ClaudeCodeHookSource
-    from termsupervisor.hooks.sources.iterm import ItermHookSource
+    使用 runtime.bootstrap 创建组件。
 
-    # 获取 HookManager 和 Timer 单例
-    hook_manager = get_hook_manager()
-    timer = get_timer()
+    Returns:
+        RuntimeComponents 包含所有组件
+    """
+    # 创建 focus 检查函数（需要先有 iterm_source 来获取 focus）
+    # 由于 bootstrap 需要 focus_checker，而 focus_checker 需要 iterm_source
+    # 所以先创建组件，再设置 focus_checker
+    components = bootstrap(connection)
+
+    # 设置 focus 检查函数（用于通知抑制判断）
+    def check_is_focused(pane_id: str) -> bool:
+        focus_session = components.iterm_source.current_focus_session
+        if not focus_session:
+            return False
+        normalized_pane = normalize_session_id(pane_id)
+        normalized_focus = normalize_session_id(focus_session)
+        return normalized_pane == normalized_focus
+
+    components.hook_manager.set_focus_checker(check_is_focused)
 
     # 设置状态变更回调 -> 广播到前端
     async def on_status_change(pane_id: str, status, reason: str, source: str, suppressed: bool):
         """状态变更时广播到前端"""
-        # 获取 pane 所在的 window/tab 名称
         window_name, tab_name, pane_name = server.supervisor.get_pane_location(pane_id)
         print(f"[HookStatus] pane_id={pane_id}, window={window_name}, tab={tab_name}, pane={pane_name}")
 
-        # 通知抑制由 StateStore 统一处理，这里直接使用结果
         needs_notification = status.needs_notification and not suppressed
 
         await server.broadcast({
@@ -65,38 +72,16 @@ async def setup_hook_system(
             "pane_name": pane_name,
         })
 
-    hook_manager.set_change_callback(on_status_change)
-
-    # 创建适配器
-    shell_source = ShellHookSource(hook_manager, connection)
-    claude_code_source = ClaudeCodeHookSource(hook_manager)
-    iterm_source = ItermHookSource(hook_manager, connection)
-
-    # 设置 focus 检查函数（用于通知抑制判断）
-    def check_is_focused(pane_id: str) -> bool:
-        focus_session = iterm_source.current_focus_session
-        if not focus_session:
-            return False
-        normalized_pane = normalize_session_id(pane_id)
-        normalized_focus = normalize_session_id(focus_session)
-        return normalized_pane == normalized_focus
-
-    hook_manager.set_focus_checker(check_is_focused)
-
-    # 创建接收器并注册适配器
-    receiver = HookReceiver(hook_manager)
-    receiver.register_adapter(claude_code_source)
+    components.hook_manager.set_change_callback(on_status_change)
 
     # 设置到 WebServer
-    server.setup_hook_receiver(receiver)
+    server.setup_hook_receiver(components.receiver)
 
-    # 启动适配器
-    await shell_source.start()
-    await claude_code_source.start()
-    await iterm_source.start()
+    # 启动 sources
+    await components.start_sources()
 
-    logger.info("[HookSystem] Hook 系统已初始化")
-    return hook_manager, shell_source, claude_code_source, iterm_source, timer
+    logger.info("[HookSystem] Hook 系统已初始化 (via bootstrap)")
+    return components
 
 
 async def start_server(connection: iterm2.Connection):
@@ -108,29 +93,30 @@ async def start_server(connection: iterm2.Connection):
         exclude_names=config.EXCLUDE_NAMES,
         min_changed_lines=config.MIN_CHANGED_LINES,
         debug=config.DEBUG,
+        iterm_client=iterm_client,
     )
 
     server = create_app(supervisor, iterm_client)
 
     # 初始化 Hook 系统（状态管理的唯一来源）
-    hook_manager, shell_source, claude_code_source, iterm_source, timer = await setup_hook_system(
-        server, connection
-    )
+    components = await setup_hook_system(server, connection)
     print("[HookSystem] Hook 系统已启动 (Shell + Claude Code + iTerm Focus)")
 
+    # 注入 hook_manager 到 supervisor（用于状态获取和 content.changed 事件）
+    supervisor.set_hook_manager(components.hook_manager)
+
     # 启动 Timer（LONG_RUNNING 检查 + Pane 延迟任务）
-    timer_task = asyncio.create_task(timer.run())
+    timer_task = asyncio.create_task(components.timer.run())
     print("[Timer] Timer 已启动")
 
-    supervisor_task = asyncio.create_task(supervisor.run(connection))
+    supervisor_task = asyncio.create_task(supervisor.run())
 
     # 定期同步 session 列表到 Shell Hook Source
     async def sync_sessions():
         while True:
             try:
-                # 获取当前所有 session_id
                 session_ids = set(supervisor.snapshots.keys())
-                await shell_source.sync_sessions(session_ids)
+                await components.shell_source.sync_sessions(session_ids)
             except Exception as e:
                 logger.error(f"[HookSystem] 同步 sessions 失败: {e}")
             await asyncio.sleep(config.POLL_INTERVAL)
@@ -151,13 +137,11 @@ async def start_server(connection: iterm2.Connection):
         await uvicorn_server.serve()
     finally:
         supervisor.stop()
-        timer.stop()
+        components.timer.stop()
         supervisor_task.cancel()
         timer_task.cancel()
         sync_task.cancel()
-        await shell_source.stop()
-        await claude_code_source.stop()
-        await iterm_source.stop()
+        await components.stop_sources()
 
 
 def main():

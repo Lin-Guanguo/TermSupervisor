@@ -1015,7 +1015,7 @@
             });
             // 如果有 sessionId，激活对应的 pane
             if (sessionId) {
-                ws.send('activate:' + sessionId);
+                ws.send(JSON.stringify({action: 'activate', session_id: sessionId}));
             }
         }
 
@@ -1575,7 +1575,7 @@
 
             paneEl.onclick = () => {
                 // 发送激活请求，后端会处理状态清除
-                ws.send('activate:' + paneData.session_id);
+                ws.send(JSON.stringify({action: 'activate', session_id: paneData.session_id}));
             };
             paneEl.oncontextmenu = (e) => showContextMenu(e, 'session', paneData.session_id, paneData.name);
 

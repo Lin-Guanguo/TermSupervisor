@@ -13,7 +13,7 @@ from collections import deque
 from typing import Generic, TypeVar, Callable, Any, Coroutine
 
 from ..telemetry import get_logger, metrics
-from ..config import QUEUE_MAX_SIZE, QUEUE_HIGH_WATERMARK
+from ..config import QUEUE_MAX_SIZE, QUEUE_HIGH_WATERMARK, METRICS_ENABLED
 from .types import HookEvent
 
 logger = get_logger(__name__)
@@ -61,13 +61,15 @@ class ActorQueue(Generic[T]):
         if len(self._queue) >= self._max_size:
             dropped = self._queue.popleft()
             logger.warning(f"[Queue:{pane_short}] Dropped oldest event (queue full)")
-            metrics.inc("queue.dropped", {"pane": pane_short})
+            if METRICS_ENABLED:
+                metrics.inc("queue.dropped", {"pane": pane_short})
 
         self._queue.append(item)
 
         # 更新 depth 指标
         depth = len(self._queue)
-        metrics.gauge("queue.depth", depth, {"pane": pane_short})
+        if METRICS_ENABLED:
+            metrics.gauge("queue.depth", depth, {"pane": pane_short})
 
         # 高水位告警
         if depth >= self._max_size * self._high_watermark:
@@ -90,8 +92,9 @@ class ActorQueue(Generic[T]):
         item = self._queue.popleft()
 
         # 更新 depth 指标
-        pane_short = self.pane_id[:8]
-        metrics.gauge("queue.depth", len(self._queue), {"pane": pane_short})
+        if METRICS_ENABLED:
+            pane_short = self.pane_id[:8]
+            metrics.gauge("queue.depth", len(self._queue), {"pane": pane_short})
 
         return item
 
@@ -114,8 +117,9 @@ class ActorQueue(Generic[T]):
         count = len(self._queue)
         self._queue.clear()
 
-        pane_short = self.pane_id[:8]
-        metrics.gauge("queue.depth", 0, {"pane": pane_short})
+        if METRICS_ENABLED:
+            pane_short = self.pane_id[:8]
+            metrics.gauge("queue.depth", 0, {"pane": pane_short})
 
         return count
 
@@ -185,7 +189,8 @@ class EventQueue(ActorQueue[HookEvent]):
                 f"[Queue:{pane_short}] Dropped stale event: "
                 f"generation {event.pane_generation} < {self._current_generation}"
             )
-            metrics.inc("queue.stale_dropped", {"pane": pane_short})
+            if METRICS_ENABLED:
+                metrics.inc("queue.stale_dropped", {"pane": pane_short})
             return False
 
         return self.enqueue(event)

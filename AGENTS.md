@@ -35,7 +35,8 @@ src/termsupervisor/
 ├── telemetry.py            # Logger + in-memory metrics facade
 ├── timer.py                # Interval/delay scheduler (LONG_RUNNING + display delay)
 ├── supervisor.py           # 1s polling + content.changed emission + layout mirror
-├── models.py               # Layout/PaneChangeQueue legacy data models
+├── runtime/                # Bootstrap + lifecycle
+│   └── bootstrap.py        # Centralized component construction (Timer, HookManager, Sources)
 ├── pane/                   # State architecture
 │   ├── manager.py          # Coordination + per-pane ActorQueue + LONG_RUNNING
 │   ├── state_machine.py    # Transition processing + history/state_id
@@ -46,26 +47,34 @@ src/termsupervisor/
 │   ├── predicates.py
 │   └── types.py
 ├── hooks/
-│   ├── manager.py          # HookManager facade (event normalize + enqueue)
+│   ├── manager.py          # HookManager facade (emit_event unified entry)
 │   ├── receiver.py         # HTTP /api/hook
-│   ├── prompt_monitor.py   # iTerm2 PromptMonitor wrapper
-│   └── sources/            # Shell, Claude Code, iTerm focus debounce
-├── analysis/               # ContentCleaner + compatibility analyzer
-├── iterm/                  # Layout traversal + client helpers
+│   └── sources/            # Shell, Claude Code, iTerm focus debounce, PromptMonitor
+│       └── prompt_monitor.py   # iTerm2 PromptMonitor wrapper
+├── analysis/               # ContentCleaner + change_queue (throttle DTOs)
+│   ├── change_queue.py     # PaneChangeQueue, PaneHistory, PaneChange, ChangeRecord
+│   ├── cleaner.py          # ChangeCleaner (debounce/similarity filter)
+│   └── content_cleaner.py  # Unicode filter + hash
+├── iterm/                  # Layout traversal + client + models
+│   ├── models.py           # Layout DTOs (LayoutData, WindowInfo, TabInfo, PaneInfo, PaneSnapshot)
+│   └── ...
 ├── render/                 # SVG renderer
 ├── web/                    # FastAPI + WebSocket handlers
+│   └── app.py              # Entry point (uses runtime.bootstrap)
 └── templates/index.html    # Frontend dashboard
 ```
 
 ## Key Files
 
+- `src/termsupervisor/runtime/bootstrap.py`: centralized component construction (Timer, HookManager, Sources, Receiver).
+- `src/termsupervisor/hooks/manager.py`: `emit_event()` unified entry, enqueue → StateManager, user/focus/click helpers.
 - `src/termsupervisor/pane/manager.py`: per-pane ActorQueue, LONG_RUNNING tick, content.changed fallback, display callback.
 - `src/termsupervisor/pane/state_machine.py`: transition processing/history/state_id; predicates in `pane/predicates.py`.
 - `src/termsupervisor/pane/pane.py`: DONE/FAILED→IDLE delayed 5s, notification suppression (<3s or focused), content hash broadcast.
 - `src/termsupervisor/timer.py`: interval + delay scheduler (async/sync), `timer.errors` metric.
-- `src/termsupervisor/pane/persistence.py`: versioned (v2) + checksum, temp+rename writes (not yet wired into runtime).
 - `src/termsupervisor/supervisor.py`: layout mirror, PaneChangeQueue-based throttle, emits `content.changed` to HookManager.
-- `src/termsupervisor/hooks/manager.py`: normalize HookEvent (generation/timestamp), enqueue → StateManager, user/focus/click helpers.
+- `src/termsupervisor/iterm/models.py`: Layout DTOs (LayoutData, WindowInfo, TabInfo, PaneInfo, PaneSnapshot).
+- `src/termsupervisor/analysis/change_queue.py`: Content throttle DTOs (PaneChangeQueue, ChangeRecord, PaneChange, PaneHistory).
 - `docs/state-architecture-current.md`: current architecture summary.
 
 ## State Machine
@@ -122,6 +131,10 @@ Signal format: `{source}.{event_type}` (e.g., `shell.command_start`, `claude-cod
 ## Current Status Notes
 
 - New state architecture (HookManager + StateManager + PaneStateMachine + Pane + Timer) is active; per-pane ActorQueue enforces ordering and generation gating.
+- Bootstrap module (`runtime/bootstrap.py`) centralizes component construction; `web/app.py` uses it as entry point.
+- Models split: layout DTOs in `iterm/models.py`, change queue DTOs in `analysis/change_queue.py`.
+- Supervisor requires explicit dependency injection (`set_hook_manager()`, `set_iterm_client()`) - no deprecated singleton fallbacks.
+- WebSocket handler accepts JSON format only (legacy `activate:xxx` format removed).
 - PaneChangeQueue/analyzer remain for content throttle in `supervisor.py`; a dedicated content hook source is still pending.
 - Persistence (v2, checksum) implemented but not yet invoked; restart loses state/history unless wired.
 - Telemetry metrics are in-memory only; no Prometheus/StatsD sink yet.
