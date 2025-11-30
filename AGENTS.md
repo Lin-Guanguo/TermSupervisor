@@ -4,10 +4,10 @@ TermSupervisor monitors iTerm2 pane content and mirrors the layout on a real-tim
 
 ## Project Overview
 
-- **Core:** iTerm2 layout mirror + content change detection with ContentCleaner + PaneChangeQueue throttle.
-- **Architecture:** HookManager → StateManager (per-pane ActorQueue) → PaneStateMachine (rules/history) → Pane display (delay + notification suppression) with Timer managing LONG_RUNNING and delayed clears; frontend is vanilla HTML/JS via WebSocket.
-- **Hooks:** Shell PromptMonitor, Claude Code HTTP hook, iTerm2 FocusMonitor (2s debounce); `content.changed` is emitted from polling when refresh is triggered.
-- **Docs:** Architecture snapshot `docs/state-architecture-current.md`; design source `mnema/state-architecture/`.
+- **Core:** iTerm2 layout mirror with per-pane state pipeline; content changes filtered by ContentCleaner + PaneChangeQueue throttling.
+- **Architecture:** HookManager → StateManager (per-pane ActorQueue) → PaneStateMachine → Pane display (delay + notification suppression) with Timer handling LONG_RUNNING + delayed clears; layout/SVG rendered to a vanilla HTML/JS WebSocket dashboard.
+- **Hooks/UI:** Shell PromptMonitor, Claude Code HTTP hook, iTerm FocusMonitor (2s debounce); `content.changed` comes from polling; frontend actions are JSON (`activate/rename/create_tab`, tabs-per-row & hidden-tab controls).
+- **Docs:** `docs/state-architecture.md`; design source `mnema/state-architecture/`; hook notes `docs/hook-manager-refactor.md`.
 
 ## Building and Running
 
@@ -75,7 +75,7 @@ src/termsupervisor/
 - `src/termsupervisor/supervisor.py`: layout mirror, PaneChangeQueue-based throttle, emits `content.changed` to HookManager.
 - `src/termsupervisor/iterm/models.py`: Layout DTOs (LayoutData, WindowInfo, TabInfo, PaneInfo, PaneSnapshot).
 - `src/termsupervisor/analysis/change_queue.py`: Content throttle DTOs (PaneChangeQueue, ChangeRecord, PaneChange, PaneHistory).
-- `docs/state-architecture-current.md`: current architecture summary.
+- `docs/state-architecture.md`: current architecture summary.
 
 ## State Machine
 
@@ -130,11 +130,8 @@ Signal format: `{source}.{event_type}` (e.g., `shell.command_start`, `claude-cod
 
 ## Current Status Notes
 
-- New state architecture (HookManager + StateManager + PaneStateMachine + Pane + Timer) is active; per-pane ActorQueue enforces ordering and generation gating.
-- Bootstrap module (`runtime/bootstrap.py`) centralizes component construction; `web/app.py` uses it as entry point.
-- Models split: layout DTOs in `iterm/models.py`, change queue DTOs in `analysis/change_queue.py`.
-- Supervisor requires explicit dependency injection (`set_hook_manager()`, `set_iterm_client()`) - no deprecated singleton fallbacks.
-- WebSocket handler accepts JSON format only (legacy `activate:xxx` format removed).
-- PaneChangeQueue/analyzer remain for content throttle in `supervisor.py`; a dedicated content hook source is still pending.
-- Persistence (v2, checksum) implemented but not yet invoked; restart loses state/history unless wired.
+- runtime/bootstrap builds the single Timer + HookManager + Sources stack; per-pane ActorQueue + generation gating are active.
+- WebSocket handler is JSON-only (`activate/rename/create_tab`); status changes broadcast from HookManager callback.
+- `supervisor.py` still uses PaneChangeQueue for content throttle; a dedicated content hook source is still pending.
+- Persistence (v2, checksum) is implemented but not auto-wired; restart resets state/history unless save/load is called.
 - Telemetry metrics are in-memory only; no Prometheus/StatsD sink yet.

@@ -7,43 +7,41 @@ Monitor iTerm2 pane content changes with a real-time web dashboard.
 
 ## Features
 
-- **Real-time Web Dashboard**: Visualizes your entire iTerm2 environment with SVG terminal rendering.
-- **Unified Layout**: Displays all windows/tabs in a responsive grid (1-6 tabs per row).
-- **Content Change Detection**: 1s polling + ContentCleaner + PaneChangeQueue throttling; emits `content.changed` for WAITING→RUNNING fallback.
-- **State Pipeline**: HookManager → StateManager (per-pane ActorQueue) → PaneStateMachine (rules/history) → Pane display (delay + notification suppression) with Timer for LONG_RUNNING + delayed clears.
-- **Visual Notifications**: Bottom floating panel with status-based colors; active pane highlight.
-- **Interactive**: Click to activate pane, right-click to rename/hide.
+- **Real-time dashboard**: Mirrors the full iTerm2 layout with SVG rendering and per-pane status overlays.
+- **Layout controls**: Adjustable tabs-per-row (1–6), hidden-tab dropdowns, context menu rename/hide, and inline “+ Tab” with layout presets.
+- **State pipeline**: HookManager → StateManager (per-pane ActorQueue) → PaneStateMachine → Pane display (delay + notification suppression) with Timer driving LONG_RUNNING and delayed clears.
+- **Content change detection**: 1s polling → ContentCleaner → PaneChangeQueue throttling; refresh on ≥5 changed lines or 10s timeout and emit `content.changed` for WAITING→RUNNING fallback.
+- **Notifications**: Floating panel with status colors; focus-aware suppression for <3s tasks or focused panes.
 
 ## Architecture
 
 ```
-Signal Sources (shell | claude-code | iterm focus | timer | content.changed)
+Signal Sources (shell | claude-code | iterm focus | frontend click | timer.check | content.changed)
         │
         ▼
 ┌──────────────────────────┐
-│       HookManager        │ normalize generation/time, enqueue
-└───────────┬──────────────┘
-            ▼
+│       HookManager        │ normalize + metrics + enqueue
+└──────────┬───────────────┘
+           ▼
 ┌──────────────────────────┐
-│      StateManager        │ per-pane ActorQueue, LONG_RUNNING tick
-└──────┬───────────┬──────┘
-       │           │
-       ▼           ▼
-┌────────────────┐ ┌────────────────┐
-│ PaneStateMachine│ │     Pane       │
-│ rules/history   │ │ display delay/ │
-│ state_id/pred   │ │ notification   │
-└────────────────┘ └────────────────┘
-            │                │
-            └─────Timer──────┘ (interval + delay tasks)
-                     │
-                     ▼
-                WebSocket/UI
+│      StateManager        │ per-pane ActorQueue + cleanup/persist
+└──────────┬───────────────┘
+           ▼
+┌────────────────┐     ┌────────────────┐
+│PaneStateMachine│     │      Pane      │
+│rules/history   │     │delay + notify  │
+└────────────────┘     │suppression     │
+        ▲              └──────┬─────────┘
+        │                     │
+   Timer.tick (LONG_RUNNING)  │ Timer.delay (DONE/FAILED→IDLE)
+        └──────────────┬──────┘
+                       ▼
+      Status callback → WebSocket/UI
 ```
 
-- Timer (`timer.py`) ticks every 1s to send `timer.check` and drive delayed display tasks.
-- Content path: Supervisor polls iTerm2 → ContentCleaner → PaneChangeQueue throttle; on refresh emits `content.changed` to HookManager and updates layout snapshots.
-- Hook sources: Shell PromptMonitor, Claude Code HTTP hook, iTerm focus debounce (2s).
+- `runtime/bootstrap.py` creates a single Timer + HookManager + Sources/Receiver; Timer ticks every 1s for LONG_RUNNING and Pane delay tasks.
+- Layout/content path: `TermSupervisor` polls iTerm2 → ContentCleaner → PaneChangeQueue (≥5 lines or 10s) → layout snapshot + `content.changed` to HookManager; WebServer pushes layout + pane statuses via WebSocket.
+- Hook sources: Shell PromptMonitor, Claude Code HTTP hook, iTerm focus debounce (2s); frontend actions use JSON messages on `/ws`.
 
 ### State Machine
 
@@ -93,8 +91,10 @@ src/termsupervisor/
 │   ├── receiver.py         # HTTP /api/hook endpoint
 │   └── sources/            # Shell, Claude Code, iTerm focus debounce, PromptMonitor
 │       └── prompt_monitor.py   # iTerm2 PromptMonitor wrapper
-├── analysis/               # ContentCleaner + compatibility analyzer
-├── iterm/                  # Layout traversal + client helpers
+├── analysis/               # ContentCleaner + change_queue (content throttle DTOs)
+│   └── change_queue.py     # PaneChangeQueue, PaneHistory, PaneChange, ChangeRecord
+├── iterm/                  # Layout traversal + client helpers + layout models
+│   └── models.py           # LayoutData, WindowInfo, TabInfo, PaneInfo, PaneSnapshot
 ├── render/                 # SVG renderer
 ├── web/                    # FastAPI + WebSocket handlers
 └── templates/index.html    # Frontend (vanilla JS)
@@ -102,14 +102,16 @@ src/termsupervisor/
 
 ## Docs
 
-- Current architecture: `docs/state-architecture-current.md`
+- Current architecture: `docs/state-architecture.md`
 - Design source: `mnema/state-architecture/`
+- Hook refactor notes: `docs/hook-manager-refactor.md`
 
 ## Current Status Notes
 
-- New state architecture is live (HookManager + StateManager + PaneStateMachine + Pane + Timer).
-- `supervisor.py` still uses PaneChangeQueue/analyzer for content throttle; a dedicated content hook source is still pending.
-- Persistence (v2, checksum) is implemented but not invoked; restart resets state/history.
+- runtime/bootstrap builds the single Timer + HookManager + Sources stack; per-pane ActorQueue + generation gating are active.
+- WebSocket handler is JSON-only (`activate/rename/create_tab`); status changes broadcast from HookManager callback.
+- `supervisor.py` still uses PaneChangeQueue for content throttle; a dedicated content hook source is still pending.
+- Persistence (v2, checksum) is implemented but not auto-wired; restart resets state/history unless save/load is called.
 - Telemetry metrics are in-memory only (no Prometheus/StatsD sink yet).
 
 ## Install
@@ -146,32 +148,53 @@ Edit `src/termsupervisor/config.py`:
 import os
 from pathlib import Path
 
-# === Polling ===
-POLL_INTERVAL = 1.0                    # seconds
+# === Polling / Debug ===
+POLL_INTERVAL = 1.0
+EXCLUDE_NAMES = ["supervisor"]
+DEBUG = True
 
-# === PaneChangeQueue ===
-QUEUE_REFRESH_LINES = 5                # SVG refresh threshold
-QUEUE_NEW_RECORD_LINES = 20            # Queue push threshold
-QUEUE_FLUSH_TIMEOUT = 10.0             # Fallback refresh (seconds)
+# === User label ===
+USER_NAME_VAR = "user.name"
+
+# === Cleaner ===
+CLEANER_MIN_CHANGED_LINES = 3
+CLEANER_SIMILARITY_THRESHOLD = 0.9
+CLEANER_DEBOUNCE_SECONDS = 5.0
+
+# === Screen sampling ===
+SCREEN_LAST_N_LINES = 30
+MIN_CHANGED_LINES = 5
+
+# === Actor queue ===
 QUEUE_MAX_SIZE = 256
-QUEUE_HIGH_WATERMARK = 0.75            # Debug watermark
+QUEUE_HIGH_WATERMARK = 0.75
 
 # === Timer ===
-TIMER_TICK_INTERVAL = 1.0              # Timer tick interval (seconds)
+TIMER_TICK_INTERVAL = 1.0
 
-# === State Machine / Display ===
-LONG_RUNNING_THRESHOLD_SECONDS = 60.0  # RUNNING → LONG_RUNNING
-STATE_HISTORY_MAX_LENGTH = 30          # History entries per pane
-STATE_HISTORY_PERSIST_LENGTH = 5       # History persisted
-DISPLAY_DELAY_SECONDS = 5.0            # DONE/FAILED → IDLE display delay
-NOTIFICATION_MIN_DURATION_SECONDS = 3.0  # Suppress short-task notifications
+# === State / Display ===
+LONG_RUNNING_THRESHOLD_SECONDS = 60.0
+STATE_HISTORY_MAX_LENGTH = 30
+STATE_HISTORY_PERSIST_LENGTH = 5
+DISPLAY_DELAY_SECONDS = 5.0
+NOTIFICATION_MIN_DURATION_SECONDS = 3.0
+FOCUS_DEBOUNCE_SECONDS = 2.0
 
-# === Focus ===
-FOCUS_DEBOUNCE_SECONDS = 2.0           # iTerm focus debounce
+# === PaneChangeQueue ===
+QUEUE_REFRESH_LINES = 5
+QUEUE_NEW_RECORD_LINES = 20
+QUEUE_FLUSH_TIMEOUT = 10.0
 
 # === Persistence ===
-PERSIST_FILE = Path(os.path.expanduser("~/.termsupervisor/state.json"))
+PERSIST_DIR = Path(os.path.expanduser("~/.termsupervisor"))
+PERSIST_FILE = PERSIST_DIR / "state.json"
 PERSIST_VERSION = 2
+
+# === Logging / Metrics ===
+LOG_LEVEL = os.environ.get("TERMSUPERVISOR_LOG_LEVEL", "INFO")
+LOG_MAX_CMD_LEN = 120
+MASK_COMMANDS = False
+METRICS_ENABLED = True
 ```
 
 ## Claude Code Integration
