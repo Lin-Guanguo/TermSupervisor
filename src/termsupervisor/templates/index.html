@@ -699,6 +699,270 @@
             font-size: 13px;
         }
 
+        /* Debug 按钮 */
+        .debug-btn {
+            background: #30363d;
+            border: 1px solid #484f58;
+            border-radius: 4px;
+            color: #8b949e;
+            padding: 4px 12px;
+            font-size: 12px;
+            cursor: pointer;
+            margin-left: auto;
+        }
+        .debug-btn:hover {
+            background: #484f58;
+            color: #e6edf3;
+        }
+        .debug-btn.active {
+            background: #1f6feb;
+            border-color: #1f6feb;
+            color: #fff;
+        }
+
+        /* Debug 面板 */
+        .debug-panel {
+            position: fixed;
+            top: 0;
+            right: -450px;
+            width: 450px;
+            height: 100vh;
+            background: #161b22;
+            border-left: 1px solid #30363d;
+            z-index: 4000;
+            display: flex;
+            flex-direction: column;
+            transition: right 0.3s ease;
+            box-shadow: -4px 0 24px rgba(0,0,0,0.4);
+        }
+        .debug-panel.open {
+            right: 0;
+        }
+        .debug-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: #21262d;
+            border-bottom: 1px solid #30363d;
+            flex-shrink: 0;
+        }
+        .debug-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #e6edf3;
+        }
+        .debug-header-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .debug-toggle-label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: #8b949e;
+            cursor: pointer;
+        }
+        .debug-toggle-label input {
+            cursor: pointer;
+        }
+        .debug-refresh-btn, .debug-close-btn {
+            background: #30363d;
+            border: none;
+            border-radius: 4px;
+            color: #8b949e;
+            padding: 4px 8px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+        .debug-refresh-btn:hover, .debug-close-btn:hover {
+            background: #484f58;
+            color: #e6edf3;
+        }
+        .debug-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .debug-states-list {
+            flex: 0 0 35%;
+            overflow-y: auto;
+            border-bottom: 1px solid #30363d;
+            padding: 8px;
+        }
+        .debug-detail {
+            flex: 0 0 40%;
+            overflow-y: auto;
+            border-bottom: 1px solid #30363d;
+            padding: 8px;
+        }
+        .debug-live-log {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .debug-log-header {
+            padding: 8px 12px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #8b949e;
+            background: #21262d;
+            border-bottom: 1px solid #30363d;
+        }
+        .debug-log-entries {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+            font-family: monospace;
+            font-size: 11px;
+        }
+        .debug-empty {
+            color: #6e7681;
+            font-size: 12px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        /* Debug state item */
+        .debug-state-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 10px;
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            margin-bottom: 6px;
+            cursor: pointer;
+            font-size: 11px;
+        }
+        .debug-state-item:hover {
+            background: #282e36;
+        }
+        .debug-state-item.selected {
+            border-color: #58a6ff;
+            background: #1f3a5f;
+        }
+        .debug-state-status {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .debug-state-status.idle { background: #6e7681; }
+        .debug-state-status.running { background: #1f6feb; }
+        .debug-state-status.long_running { background: #0d419d; }
+        .debug-state-status.waiting_approval { background: #d29922; }
+        .debug-state-status.done { background: #238636; }
+        .debug-state-status.failed { background: #da3633; }
+        .debug-state-id {
+            color: #8b949e;
+            font-family: monospace;
+            flex-shrink: 0;
+        }
+        .debug-state-info {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .debug-state-source {
+            color: #58a6ff;
+        }
+        .debug-state-desc {
+            color: #8b949e;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .debug-state-stats {
+            display: flex;
+            gap: 8px;
+            color: #6e7681;
+            font-size: 10px;
+        }
+        .debug-state-stats span {
+            white-space: nowrap;
+        }
+        .debug-state-stats .warn {
+            color: #d29922;
+        }
+
+        /* Debug detail section */
+        .debug-detail-section {
+            margin-bottom: 12px;
+        }
+        .debug-detail-title {
+            font-size: 11px;
+            font-weight: 600;
+            color: #8b949e;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+        }
+        .debug-detail-content {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            padding: 8px;
+            font-family: monospace;
+            font-size: 11px;
+            color: #e6edf3;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        .debug-history-item {
+            padding: 4px 0;
+            border-bottom: 1px solid #21262d;
+            display: flex;
+            gap: 8px;
+        }
+        .debug-history-item:last-child {
+            border-bottom: none;
+        }
+        .debug-history-time {
+            color: #6e7681;
+            flex-shrink: 0;
+        }
+        .debug-history-signal {
+            color: #58a6ff;
+        }
+        .debug-history-result {
+            color: #3fb950;
+        }
+        .debug-history-result.fail {
+            color: #da3633;
+        }
+
+        /* Debug log entry */
+        .debug-log-entry {
+            padding: 4px 6px;
+            border-bottom: 1px solid #21262d;
+            line-height: 1.4;
+        }
+        .debug-log-entry:last-child {
+            border-bottom: none;
+        }
+        .debug-log-time {
+            color: #6e7681;
+        }
+        .debug-log-pane {
+            color: #8b949e;
+        }
+        .debug-log-signal {
+            color: #58a6ff;
+        }
+        .debug-log-result {
+            color: #3fb950;
+        }
+        .debug-log-result.fail {
+            color: #da3633;
+        }
+
         /* 移动端响应式 */
         @media (max-width: 768px) {
             body {
@@ -813,6 +1077,7 @@
                 <option value="6">6</option>
             </select>
         </div>
+        <button class="debug-btn" id="debugBtn">Debug</button>
     </div>
     <div class="windows-container" id="windows"></div>
     <div class="status disconnected" id="status">Disconnected</div>
@@ -848,6 +1113,35 @@
             <div class="modal-buttons">
                 <button class="modal-btn cancel" id="modalCancel">Cancel</button>
                 <button class="modal-btn save" id="modalSave">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Debug 面板 -->
+    <div class="debug-panel" id="debugPanel">
+        <div class="debug-header">
+            <span class="debug-title">Debug Panel</span>
+            <div class="debug-header-actions">
+                <label class="debug-toggle-label">
+                    <input type="checkbox" id="debugLiveToggle">
+                    <span>Live Events</span>
+                </label>
+                <button class="debug-refresh-btn" id="debugRefresh">Refresh</button>
+                <button class="debug-close-btn" id="debugClose">X</button>
+            </div>
+        </div>
+        <div class="debug-content">
+            <div class="debug-states-list" id="debugStatesList">
+                <div class="debug-empty">Loading...</div>
+            </div>
+            <div class="debug-detail" id="debugDetail">
+                <div class="debug-empty">Select a pane to view details</div>
+            </div>
+            <div class="debug-live-log" id="debugLiveLog">
+                <div class="debug-log-header">Live Events</div>
+                <div class="debug-log-entries" id="debugLogEntries">
+                    <div class="debug-empty">Enable "Live Events" to start</div>
+                </div>
             </div>
         </div>
     </div>
@@ -1244,6 +1538,17 @@
                 }
                 if (data.type === 'create_tab_result') {
                     console.log('Create tab result:', data.window_id, data.success);
+                    return;
+                }
+                // 调试事件（Debug Panel 用）
+                if (data.type === 'debug_event') {
+                    if (typeof handleDebugEvent === 'function') {
+                        handleDebugEvent(data);
+                    }
+                    return;
+                }
+                if (data.type === 'debug_subscribe_result') {
+                    console.log('Debug subscribe result:', data);
                     return;
                 }
                 // Hook 状态更新（来自 Claude Code 等外部工具）
@@ -1904,6 +2209,218 @@
         }
 
         connect();
+
+        // ==================== Debug Panel ====================
+
+        const debugPanel = document.getElementById('debugPanel');
+        const debugBtn = document.getElementById('debugBtn');
+        const debugClose = document.getElementById('debugClose');
+        const debugRefresh = document.getElementById('debugRefresh');
+        const debugLiveToggle = document.getElementById('debugLiveToggle');
+        const debugStatesList = document.getElementById('debugStatesList');
+        const debugDetail = document.getElementById('debugDetail');
+        const debugLogEntries = document.getElementById('debugLogEntries');
+
+        let debugSelectedPaneId = null;
+        let debugRefreshInterval = null;
+        let isDebugLiveEnabled = false;
+
+        // Open/close debug panel
+        debugBtn.addEventListener('click', () => {
+            const isOpen = debugPanel.classList.toggle('open');
+            debugBtn.classList.toggle('active', isOpen);
+            if (isOpen) {
+                fetchDebugStates();
+                startDebugRefresh();
+            } else {
+                stopDebugRefresh();
+                if (isDebugLiveEnabled) {
+                    toggleDebugLive(false);
+                }
+            }
+        });
+
+        debugClose.addEventListener('click', () => {
+            debugPanel.classList.remove('open');
+            debugBtn.classList.remove('active');
+            stopDebugRefresh();
+            if (isDebugLiveEnabled) {
+                toggleDebugLive(false);
+            }
+        });
+
+        debugRefresh.addEventListener('click', () => {
+            fetchDebugStates();
+            if (debugSelectedPaneId) {
+                fetchDebugDetail(debugSelectedPaneId);
+            }
+        });
+
+        debugLiveToggle.addEventListener('change', (e) => {
+            toggleDebugLive(e.target.checked);
+        });
+
+        function startDebugRefresh() {
+            stopDebugRefresh();
+            debugRefreshInterval = setInterval(fetchDebugStates, 5000);
+        }
+
+        function stopDebugRefresh() {
+            if (debugRefreshInterval) {
+                clearInterval(debugRefreshInterval);
+                debugRefreshInterval = null;
+            }
+        }
+
+        function toggleDebugLive(enable) {
+            isDebugLiveEnabled = enable;
+            debugLiveToggle.checked = enable;
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    action: 'debug_subscribe',
+                    subscribe: enable
+                }));
+            }
+            if (!enable) {
+                debugLogEntries.innerHTML = '<div class="debug-empty">Enable "Live Events" to start</div>';
+            }
+        }
+
+        async function fetchDebugStates() {
+            try {
+                const response = await fetch('/api/debug/states');
+                if (!response.ok) throw new Error('Failed to fetch');
+                const data = await response.json();
+                renderDebugStates(data.states || []);
+            } catch (e) {
+                debugStatesList.innerHTML = '<div class="debug-empty">Failed to load states</div>';
+            }
+        }
+
+        function renderDebugStates(states) {
+            if (states.length === 0) {
+                debugStatesList.innerHTML = '<div class="debug-empty">No panes</div>';
+                return;
+            }
+
+            debugStatesList.innerHTML = states.map(s => {
+                const shortId = s.pane_id.substring(0, 8);
+                const duration = s.running_duration ? `${s.running_duration.toFixed(1)}s` : '-';
+                const drops = s.queue_low_priority_drops + s.queue_overflow_drops;
+                const dropsClass = drops > 0 ? 'warn' : '';
+                const selected = s.pane_id === debugSelectedPaneId ? 'selected' : '';
+
+                return `
+                    <div class="debug-state-item ${selected}" data-pane-id="${s.pane_id}">
+                        <div class="debug-state-status ${s.status}"></div>
+                        <span class="debug-state-id">${shortId}</span>
+                        <div class="debug-state-info">
+                            <span class="debug-state-source">${s.source}</span>
+                            <span class="debug-state-desc">${s.description || '-'}</span>
+                        </div>
+                        <div class="debug-state-stats">
+                            <span>Q:${s.queue_depth}</span>
+                            <span class="${dropsClass}">D:${drops}</span>
+                            <span>ID:${s.state_id}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            // Add click handlers
+            debugStatesList.querySelectorAll('.debug-state-item').forEach(el => {
+                el.addEventListener('click', () => {
+                    debugSelectedPaneId = el.dataset.paneId;
+                    debugStatesList.querySelectorAll('.debug-state-item').forEach(i =>
+                        i.classList.toggle('selected', i.dataset.paneId === debugSelectedPaneId)
+                    );
+                    fetchDebugDetail(debugSelectedPaneId);
+                });
+            });
+        }
+
+        async function fetchDebugDetail(paneId) {
+            try {
+                const response = await fetch(`/api/debug/state/${paneId}?max_history=20&max_pending_events=10`);
+                if (!response.ok) throw new Error('Failed to fetch');
+                const data = await response.json();
+                renderDebugDetail(data);
+            } catch (e) {
+                debugDetail.innerHTML = '<div class="debug-empty">Failed to load details</div>';
+            }
+        }
+
+        function renderDebugDetail(data) {
+            const machine = data.machine || {};
+            const queue = data.queue || {};
+            const history = data.history || [];
+            const pending = queue.pending || [];
+
+            const historyHtml = history.slice().reverse().map(h => {
+                const time = new Date(h.timestamp * 1000).toLocaleTimeString();
+                const resultClass = h.success ? '' : 'fail';
+                const mark = h.success ? '>' : 'X';
+                return `
+                    <div class="debug-history-item">
+                        <span class="debug-history-time">${time}</span>
+                        <span class="debug-history-signal">${h.signal}</span>
+                        <span class="debug-history-result ${resultClass}">${mark} ${h.to_status}</span>
+                    </div>
+                `;
+            }).join('') || '<div class="debug-empty">No history</div>';
+
+            const pendingHtml = pending.map(p => {
+                return `<div>${p.signal} (gen:${p.generation})</div>`;
+            }).join('') || '<div class="debug-empty">Queue empty</div>';
+
+            debugDetail.innerHTML = `
+                <div class="debug-detail-section">
+                    <div class="debug-detail-title">Machine State</div>
+                    <div class="debug-detail-content">
+                        <div>Status: ${machine.status} | Source: ${machine.source}</div>
+                        <div>State ID: ${machine.state_id} | Generation: ${machine.pane_generation}</div>
+                        <div>Description: ${machine.description || '-'}</div>
+                    </div>
+                </div>
+                <div class="debug-detail-section">
+                    <div class="debug-detail-title">Queue (${queue.depth}/${queue.max_size})</div>
+                    <div class="debug-detail-content">${pendingHtml}</div>
+                </div>
+                <div class="debug-detail-section">
+                    <div class="debug-detail-title">History</div>
+                    <div class="debug-detail-content">${historyHtml}</div>
+                </div>
+            `;
+        }
+
+        function handleDebugEvent(event) {
+            if (!isDebugLiveEnabled) return;
+
+            const time = new Date().toLocaleTimeString();
+            const shortId = (event.pane_id || '').substring(0, 8);
+            const resultClass = event.result === 'ok' ? '' : 'fail';
+            const reason = event.reason ? ` (${event.reason})` : '';
+
+            const entry = document.createElement('div');
+            entry.className = 'debug-log-entry';
+            entry.innerHTML = `
+                <span class="debug-log-time">${time}</span>
+                <span class="debug-log-pane">[${shortId}]</span>
+                <span class="debug-log-signal">${event.signal || '-'}</span>
+                <span class="debug-log-result ${resultClass}">${event.result || '-'}${reason}</span>
+            `;
+
+            // Remove empty message if present
+            const emptyEl = debugLogEntries.querySelector('.debug-empty');
+            if (emptyEl) emptyEl.remove();
+
+            // Insert at top, limit to 100 entries
+            debugLogEntries.insertBefore(entry, debugLogEntries.firstChild);
+            while (debugLogEntries.children.length > 100) {
+                debugLogEntries.lastChild.remove();
+            }
+        }
+
     </script>
 </body>
 </html>

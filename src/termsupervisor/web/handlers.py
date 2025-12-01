@@ -4,6 +4,7 @@ JSON 格式：
 - {"action": "activate", "session_id": "xxx"}
 - {"action": "rename", "type": "pane|tab|window", "id": "xxx", "name": "yyy"}
 - {"action": "create_tab", "window_id": "xxx", "layout": "single|split"}
+- {"action": "debug_subscribe", "subscribe": true|false}
 """
 
 import json
@@ -18,6 +19,7 @@ from termsupervisor.telemetry import get_logger
 
 if TYPE_CHECKING:
     from termsupervisor.hooks import HookManager
+    from termsupervisor.web.server import WebServer
 
 logger = get_logger(__name__)
 
@@ -33,6 +35,7 @@ class MessageHandler:
     supervisor: TermSupervisor
     broadcast: Callable[[dict], Awaitable[None]]
     hook_manager: "HookManager | None" = field(default=None)
+    web_server: "WebServer | None" = field(default=None)
 
     async def handle(self, websocket: WebSocket, data: str):
         """处理 WebSocket 消息
@@ -56,6 +59,8 @@ class MessageHandler:
             await self._handle_rename_action(websocket, msg)
         elif action == "create_tab":
             await self._handle_create_tab_action(websocket, msg)
+        elif action == "debug_subscribe":
+            await self._handle_debug_subscribe(websocket, msg)
         else:
             logger.warning(f"[WS] Unknown action: {action}")
             await websocket.send_json({"type": "error", "message": f"Unknown action: {action}"})
@@ -128,3 +133,32 @@ class MessageHandler:
             await self.supervisor.check_updates()
             await self.broadcast(self.supervisor.get_layout_dict())
         return success
+
+    async def _handle_debug_subscribe(self, websocket: WebSocket, msg: dict):
+        """处理调试订阅请求
+
+        JSON 格式: {"action": "debug_subscribe", "subscribe": true|false}
+        """
+        subscribe = msg.get("subscribe", True)
+
+        if not self.web_server:
+            await websocket.send_json({
+                "type": "debug_subscribe_result",
+                "success": False,
+                "message": "WebServer not initialized",
+            })
+            return
+
+        if subscribe:
+            self.web_server.subscribe_debug(websocket)
+            logger.info("[WS] Debug subscription enabled")
+        else:
+            self.web_server.unsubscribe_debug(websocket)
+            logger.info("[WS] Debug subscription disabled")
+
+        await websocket.send_json({
+            "type": "debug_subscribe_result",
+            "success": True,
+            "subscribed": subscribe,
+            "subscriber_count": self.web_server.debug_subscriber_count,
+        })

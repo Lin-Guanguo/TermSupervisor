@@ -33,6 +33,7 @@ LOG_WARNING = logging.WARNING
 
 # 回调类型
 StatusChangeCallback = Callable[[str, TaskStatus, str, str, bool], Any]
+DebugEventCallback = Callable[[dict], Any]
 FocusChecker = Callable[[str], bool]
 
 
@@ -85,6 +86,15 @@ class HookManager:
     def set_focus_checker(self, checker: FocusChecker) -> None:
         """设置 focus 检查函数"""
         self._state_manager.set_focus_checker(checker)
+
+    def set_debug_event_callback(self, callback: DebugEventCallback) -> None:
+        """设置调试事件回调
+
+        Args:
+            callback: 回调函数 (event_dict) -> None
+                event_dict 包含: pane_id, signal, result, reason, state_id
+        """
+        self._state_manager.set_on_debug_event(callback)
 
     def _on_display_change(
         self,
@@ -440,6 +450,36 @@ class HookManager:
         """获取 pane 的状态历史"""
         machine = self._state_manager.get_machine(pane_id)
         return machine.history if machine else []
+
+    def get_debug_state(
+        self,
+        pane_id: str,
+        *,
+        max_history: int | None = None,
+        max_pending_events: int = 10,
+    ) -> dict | None:
+        """获取 pane 的调试快照"""
+        return self._state_manager.get_debug_snapshot(
+            pane_id,
+            max_history=max_history,
+            max_pending_events=max_pending_events,
+        )
+
+    def get_all_debug_states(
+        self,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """获取所有 pane 的调试快照列表
+
+        Returns:
+            (snapshots, total) 元组
+        """
+        return self._state_manager.get_all_debug_snapshots(
+            limit=limit,
+            offset=offset,
+        )
 
     # === 内部访问（用于集成）===
 

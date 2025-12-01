@@ -33,6 +33,7 @@ logger = get_logger(__name__)
 
 # 回调类型
 OnDisplayChangeCallback = Callable[[str, DisplayState, bool, str], Any]
+OnDebugEventCallback = Callable[[dict], Any]
 FocusChecker = Callable[[str], bool]
 
 
@@ -61,6 +62,7 @@ class StateManager:
 
         # 回调
         self._on_display_change: OnDisplayChangeCallback | None = None
+        self._on_debug_event: OnDebugEventCallback | None = None
         self._focus_checker: FocusChecker | None = None
 
         # pane generation 跟踪
@@ -80,6 +82,19 @@ class StateManager:
     def set_on_display_change(self, callback: OnDisplayChangeCallback) -> None:
         """设置显示变化回调"""
         self._on_display_change = callback
+
+    def set_on_debug_event(self, callback: OnDebugEventCallback) -> None:
+        """设置调试事件回调
+
+        Args:
+            callback: 回调函数 (event_dict) -> None
+                event_dict 包含: pane_id, signal, result, reason, state_id,
+                以及队列统计: queue_depth, queue_low_priority_drops, queue_overflow_drops
+        """
+        self._on_debug_event = callback
+        # 同步到已有的队列
+        for queue in self._queues.values():
+            queue.set_on_debug_event(callback)
 
     def set_focus_checker(self, checker: FocusChecker) -> None:
         """设置 focus 检查函数"""
@@ -131,6 +146,10 @@ class StateManager:
         # 创建队列
         queue = EventQueue(pane_id)
         queue.set_current_generation(self._pane_generations[pane_id])
+        queue.set_current_state_id(machine.state_id)
+        # 绑定队列调试回调
+        if self._on_debug_event:
+            queue.set_on_debug_event(self._on_debug_event)
 
         self._machines[pane_id] = machine
         self._panes[pane_id] = pane
@@ -147,6 +166,47 @@ class StateManager:
         if pane:
             suppressed, reason = pane.should_suppress_notification()
             self._on_display_change(pane_id, state, suppressed, reason)
+
+    def _emit_debug_event(
+        self,
+        pane_id: str,
+        signal: str,
+        result: str,
+        reason: str = "",
+        state_id: int = 0,
+    ) -> None:
+        """发送调试事件
+
+        Args:
+            pane_id: pane 标识
+            signal: 事件信号
+            result: 结果 ("ok" or "fail")
+            reason: 失败原因（可选）
+            state_id: 当前 state_id
+        """
+        if not self._on_debug_event:
+            return
+
+        # 获取队列统计
+        queue = self._queues.get(pane_id)
+        queue_depth = 0
+        queue_low_priority_drops = 0
+        queue_overflow_drops = 0
+        if queue:
+            queue_depth = queue.depth
+            queue_low_priority_drops = queue.low_priority_drops
+            queue_overflow_drops = queue.overflow_drops
+
+        self._on_debug_event({
+            "pane_id": pane_id,
+            "signal": signal,
+            "result": result,
+            "reason": reason,
+            "state_id": state_id,
+            "queue_depth": queue_depth,
+            "queue_low_priority_drops": queue_low_priority_drops,
+            "queue_overflow_drops": queue_overflow_drops,
+        })
 
     # === 事件处理 ===
 
@@ -246,8 +306,25 @@ class StateManager:
                     # 清除 WAITING fallback 跟踪
                     self._waiting_fallback.pop(pane_id, None)
                     pane.handle_state_change(change)
+                    # 更新队列的 state_id
+                    queue = self._queues.get(pane_id)
+                    if queue:
+                        queue.set_current_state_id(machine.state_id)
+                    # 发送调试事件
+                    self._emit_debug_event(
+                        pane_id, event.signal, "ok",
+                        state_id=machine.state_id
+                    )
+                else:
+                    # 获取失败原因
+                    reason = self._get_last_fail_reason(machine)
+                    self._emit_debug_event(
+                        pane_id, event.signal, "fail",
+                        reason=reason, state_id=machine.state_id
+                    )
                 return change is not None
 
+            # 非 WAITING 状态的 content 事件不触发调试事件（太频繁）
             return True
 
         # 其他事件转发给状态机
@@ -270,7 +347,34 @@ class StateManager:
 
             pane.handle_state_change(change)
 
+            # 更新队列的 state_id
+            queue = self._queues.get(pane_id)
+            if queue:
+                queue.set_current_state_id(machine.state_id)
+
+            # 发送调试事件
+            self._emit_debug_event(
+                pane_id, event.signal, "ok",
+                state_id=machine.state_id
+            )
+        else:
+            # 获取失败原因
+            reason = self._get_last_fail_reason(machine)
+            self._emit_debug_event(
+                pane_id, event.signal, "fail",
+                reason=reason, state_id=machine.state_id
+            )
+
         return change is not None
+
+    def _get_last_fail_reason(self, machine: PaneStateMachine) -> str:
+        """从状态机历史获取最后一次失败原因"""
+        history = machine.history
+        if history:
+            last_entry = history[-1]
+            if not last_entry.success:
+                return last_entry.description
+        return ""
 
     # === LONG_RUNNING 检查 ===
 
@@ -305,6 +409,15 @@ class StateManager:
                     if pane:
                         pane.handle_state_change(change)
                     triggered.append(pane_id)
+                    # 更新队列的 state_id
+                    queue = self._queues.get(pane_id)
+                    if queue:
+                        queue.set_current_state_id(machine.state_id)
+                    # 发送调试事件
+                    self._emit_debug_event(
+                        pane_id, event.signal, "ok",
+                        state_id=machine.state_id
+                    )
 
         # 检查 WAITING fallback 超时
         self._check_waiting_fallback()
@@ -382,10 +495,27 @@ class StateManager:
                 metrics.inc("waiting.fallback", {"pane": pane_short, "reason": reason})
 
                 triggered.append(pane_id)
+
+                # 更新队列的 state_id
+                queue = self._queues.get(pane_id)
+                if queue:
+                    queue.set_current_state_id(machine.state_id)
+
+                # 发送调试事件
+                self._emit_debug_event(
+                    pane_id, event.signal, "ok",
+                    state_id=machine.state_id
+                )
             else:
                 logger.warning(
                     f"[StateManager:{pane_short}] WAITING fallback failed: "
                     f"no transition for {event.signal}"
+                )
+                # 发送失败调试事件
+                fail_reason = self._get_last_fail_reason(machine)
+                self._emit_debug_event(
+                    pane_id, event.signal, "fail",
+                    reason=fail_reason, state_id=machine.state_id
                 )
 
             to_remove.append(pane_id)
@@ -449,6 +579,115 @@ class StateManager:
             queue.set_current_generation(self._pane_generations[pane_id])
 
         return self._pane_generations[pane_id]
+
+    def get_debug_snapshot(
+        self,
+        pane_id: str,
+        *,
+        max_history: int | None = None,
+        max_pending_events: int = 10,
+    ) -> dict | None:
+        """获取指定 pane 的调试快照"""
+        pane_id = normalize_session_id(pane_id)
+        machine = self._machines.get(pane_id)
+        pane = self._panes.get(pane_id)
+        queue = self._queues.get(pane_id)
+
+        if not machine or not pane or not queue:
+            return None
+
+        waiting_info = None
+        if pane_id in self._waiting_fallback:
+            entered_at, state_id, has_content = self._waiting_fallback[pane_id]
+            waiting_info = {
+                "entered_at": entered_at,
+                "state_id": state_id,
+                "has_content_change": has_content,
+                "timeout_seconds": WAITING_FALLBACK_TIMEOUT_SECONDS,
+            }
+
+        history_entries = machine.history
+        if max_history is not None:
+            history_entries = history_entries[-max_history:]
+
+        return {
+            "pane_id": pane_id,
+            "machine": {
+                "status": machine.status.value,
+                "source": machine.source,
+                "started_at": machine.started_at,
+                "state_id": machine.state_id,
+                "pane_generation": machine.pane_generation,
+                "description": machine.description,
+            },
+            "display": pane.get_display_dict(),
+            "queue": queue.debug_snapshot(max_pending=max_pending_events),
+            "waiting_fallback": waiting_info,
+            "history": [entry.to_dict() for entry in history_entries],
+            "content_hash": pane.content_hash,
+        }
+
+    def get_all_debug_snapshots(
+        self,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """获取所有 pane 的调试快照列表
+
+        Args:
+            limit: 最大返回数量
+            offset: 起始偏移量
+
+        Returns:
+            (snapshots, total) 元组：
+            - snapshots: 调试快照列表，每个包含 pane_id, status, source, state_id,
+              description, running_duration, queue stats, latest_history
+            - total: 总 pane 数（分页前）
+        """
+        snapshots = []
+        all_pane_ids = sorted(self._panes.keys())
+        total = len(all_pane_ids)
+
+        # 应用分页
+        pane_ids = all_pane_ids
+        if offset > 0:
+            pane_ids = pane_ids[offset:]
+        if limit is not None and limit > 0:
+            pane_ids = pane_ids[:limit]
+
+        for pane_id in pane_ids:
+            machine = self._machines.get(pane_id)
+            pane = self._panes.get(pane_id)
+            queue = self._queues.get(pane_id)
+
+            if not machine or not pane or not queue:
+                continue
+
+            display = pane.get_display_dict()
+            queue_info = queue.debug_snapshot(max_pending=0)
+            history = machine.history
+
+            # 获取最近一条历史
+            latest_history = None
+            if history:
+                entry = history[-1]
+                latest_history = entry.to_dict()
+
+            snapshots.append({
+                "pane_id": pane_id,
+                "status": machine.status.value,
+                "source": machine.source,
+                "state_id": machine.state_id,
+                "description": machine.description,
+                "running_duration": display.get("running_duration", 0.0),
+                "queue_depth": queue_info.get("depth", 0),
+                "queue_low_priority_drops": queue_info.get("low_priority_drops", 0),
+                "queue_overflow_drops": queue_info.get("overflow_drops", 0),
+                "latest_history": latest_history,
+            })
+
+        return snapshots, total
 
     # === 清理 ===
 
@@ -516,8 +755,13 @@ class StateManager:
         # 创建队列
         for pane_id in self._machines.keys():
             if pane_id not in self._queues:
+                machine = self._machines[pane_id]
                 queue = EventQueue(pane_id)
                 queue.set_current_generation(self._pane_generations.get(pane_id, 1))
+                queue.set_current_state_id(machine.state_id)
+                # 绑定队列调试回调
+                if self._on_debug_event:
+                    queue.set_on_debug_event(self._on_debug_event)
                 self._queues[pane_id] = queue
 
         logger.info(

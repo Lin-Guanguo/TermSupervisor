@@ -10,7 +10,7 @@
 """
 
 from collections import deque
-from typing import Generic, TypeVar, Callable, Any, Coroutine
+from typing import Generic, TypeVar, Callable, Any
 
 from ..telemetry import get_logger, metrics
 from ..config import (
@@ -24,6 +24,9 @@ from ..config import (
 from .types import HookEvent
 
 logger = get_logger(__name__)
+
+# 调试事件回调类型
+OnQueueDebugEventCallback = Callable[[dict], Any]
 
 T = TypeVar("T")
 
@@ -178,6 +181,37 @@ class EventQueue(ActorQueue[HookEvent]):
         # 丢弃计数器
         self._low_priority_drops: int = 0
         self._overflow_drops: int = 0
+        # 调试事件回调
+        self._on_debug_event: OnQueueDebugEventCallback | None = None
+
+    def set_on_debug_event(self, callback: OnQueueDebugEventCallback | None) -> None:
+        """设置调试事件回调"""
+        self._on_debug_event = callback
+
+    def _emit_debug_event(
+        self,
+        signal: str,
+        reason: str,
+    ) -> None:
+        """发送队列调试事件
+
+        Args:
+            signal: 被丢弃/合并的信号
+            reason: 原因 (e.g., "drop_low_priority", "drop_overflow", "merge_content")
+        """
+        if not self._on_debug_event:
+            return
+
+        self._on_debug_event({
+            "pane_id": self.pane_id,
+            "signal": signal,
+            "result": "ok",  # Normalized to match contract
+            "reason": reason,
+            "state_id": self._current_state_id,
+            "queue_depth": len(self._queue),
+            "queue_low_priority_drops": self._low_priority_drops,
+            "queue_overflow_drops": self._overflow_drops,
+        })
 
     def set_current_generation(self, generation: int) -> None:
         """设置当前 generation"""
@@ -216,6 +250,8 @@ class EventQueue(ActorQueue[HookEvent]):
             )
             if METRICS_ENABLED:
                 metrics.inc("queue.stale_dropped", {"pane": pane_short})
+            # 发送调试事件
+            self._emit_debug_event(event.signal, "drop_stale_generation")
             return False
 
         # 优先级策略：低优先级事件在高水位时被丢弃
@@ -227,6 +263,8 @@ class EventQueue(ActorQueue[HookEvent]):
             self._low_priority_drops += 1
             if METRICS_ENABLED:
                 metrics.inc("queue.low_priority_dropped", {"pane": pane_short})
+            # 发送调试事件
+            self._emit_debug_event(event.signal, "drop_low_priority_watermark")
             return False
 
         # 队列满时，使用保护策略丢弃
@@ -283,6 +321,8 @@ class EventQueue(ActorQueue[HookEvent]):
                 )
                 if METRICS_ENABLED:
                     metrics.inc("queue.overflow_low_priority", {"pane": pane_short})
+                # 发送调试事件
+                self._emit_debug_event(dropped.signal, "drop_overflow_low_priority")
                 return dropped
 
         # 第二轮：找最旧的非保护事件
@@ -296,6 +336,8 @@ class EventQueue(ActorQueue[HookEvent]):
                 )
                 if METRICS_ENABLED:
                     metrics.inc("queue.overflow_normal", {"pane": pane_short})
+                # 发送调试事件
+                self._emit_debug_event(dropped.signal, "drop_overflow_normal")
                 return dropped
 
         # 全是保护事件，无法丢弃
@@ -353,9 +395,36 @@ class EventQueue(ActorQueue[HookEvent]):
 
         self._queue = new_queue
 
-        if merged > 0 and METRICS_ENABLED:
-            pane_short = self.pane_id[:8]
-            metrics.inc("queue.content_merged", {"pane": pane_short}, merged)
-            logger.debug(f"[Queue:{pane_short}] Merged {merged} content events")
+        if merged > 0:
+            if METRICS_ENABLED:
+                pane_short = self.pane_id[:8]
+                metrics.inc("queue.content_merged", {"pane": pane_short}, merged)
+                logger.debug(f"[Queue:{pane_short}] Merged {merged} content events")
+            # 发送调试事件
+            self._emit_debug_event(
+                "content.update",
+                f"merge_content_{merged}_events"
+            )
 
         return merged
+
+    def debug_snapshot(self, max_pending: int = 10) -> dict:
+        """获取调试快照"""
+        pending_events = list(self._queue)[:max_pending]
+        return {
+            "depth": len(self._queue),
+            "max_size": self._max_size,
+            "is_processing": self._processing,
+            "current_generation": self._current_generation,
+            "low_priority_drops": self._low_priority_drops,
+            "overflow_drops": self._overflow_drops,
+            "pending": [
+                {
+                    "signal": evt.signal,
+                    "source": evt.source,
+                    "generation": evt.pane_generation,
+                    "timestamp": evt.timestamp,
+                }
+                for evt in pending_events
+            ],
+        }
