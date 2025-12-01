@@ -6,10 +6,8 @@
 - state_id 防乱序
 - 通知抑制（短任务 < 3s 或 focus）
 - 内容更新触发渲染
-- 序列化显示状态与内容
 """
 
-from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable, Any, TYPE_CHECKING
 
@@ -386,59 +384,6 @@ class Pane:
         # 触发回调（如果需要）
         if self._on_display_change:
             self._on_display_change(self._display_state)
-
-    # === 序列化 ===
-
-    def to_dict(self) -> dict:
-        """序列化为字典"""
-        # 序列化 display_state 的原始字段（不包含计算字段）
-        ds = self._display_state
-        return {
-            "pane_id": self.pane_id,
-            "display_state": {
-                "status": ds.status.value,
-                "source": ds.source,
-                "description": ds.description,
-                "state_id": ds.state_id,
-                "started_at": ds.started_at,
-                "running_duration": ds.running_duration,
-                "recently_finished": ds.recently_finished,
-                "quiet_completion": ds.quiet_completion,
-            },
-            "content_hash": self._content_hash,
-            # 不持久化 content（太大）
-        }
-
-    @classmethod
-    def from_dict(
-        cls,
-        data: dict,
-        timer: "Timer | None" = None,
-        focus_checker: "Callable[[str], bool] | None" = None,
-    ) -> "Pane":
-        """从字典反序列化"""
-        pane = cls(
-            pane_id=data["pane_id"],
-            timer=timer,
-            focus_checker=focus_checker,
-        )
-
-        # 恢复显示状态
-        ds = data.get("display_state", {})
-        pane._display_state = DisplayState(
-            status=TaskStatus(ds.get("status", "idle")),
-            source=ds.get("source", "shell"),
-            description=ds.get("description", ""),
-            state_id=ds.get("state_id", 0),
-            started_at=ds.get("started_at"),
-            running_duration=ds.get("running_duration", 0.0),
-            content_hash=data.get("content_hash", ""),
-            recently_finished=ds.get("recently_finished", False),
-            quiet_completion=ds.get("quiet_completion", False),
-        )
-        pane._content_hash = data.get("content_hash", "")
-
-        return pane
 
     # === 便捷方法 ===
 

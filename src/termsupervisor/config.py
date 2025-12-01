@@ -7,11 +7,9 @@
 - Timer 配置：定时器参数
 - 显示配置：延迟显示、通知抑制
 - Focus 配置：防抖参数
-- 持久化配置：状态文件路径和版本
 """
 
 import os
-from pathlib import Path
 
 # === 轮询配置 ===
 POLL_INTERVAL = 1.0  # 内容读取间隔（秒）
@@ -47,7 +45,6 @@ TIMER_TICK_INTERVAL = 1.0  # Timer tick 间隔（秒）
 # === 状态机配置 ===
 LONG_RUNNING_THRESHOLD_SECONDS = 60.0  # RUNNING → LONG_RUNNING 阈值
 STATE_HISTORY_MAX_LENGTH = 30  # 内存中历史记录最大长度
-STATE_HISTORY_PERSIST_LENGTH = 5  # 持久化历史记录长度
 
 # === 显示层配置 ===
 DISPLAY_DELAY_SECONDS = 5.0  # DONE/FAILED → IDLE 延迟显示（秒）
@@ -58,14 +55,6 @@ QUIET_COMPLETION_THRESHOLD_SECONDS = 3.0  # 静默完成阈值（秒），短于
 
 # === Focus 防抖配置 ===
 FOCUS_DEBOUNCE_SECONDS = 2.0  # iTerm2 focus 防抖时间
-
-# === 持久化配置 ===
-PERSIST_DIR = Path(os.path.expanduser("~/.termsupervisor"))
-PERSIST_FILE = PERSIST_DIR / "state.json"
-PERSIST_VERSION = 2  # 持久化文件版本
-PERSIST_ENABLED = True  # 是否启用持久化
-PERSIST_INTERVAL_SECONDS = 60.0  # 周期性保存间隔（秒）
-PERSIST_LOAD_ON_STARTUP = True  # 启动时是否加载状态
 
 # === 内容渲染配置 ===
 QUEUE_REFRESH_LINES = 5  # 中等变化阈值，触发页面刷新

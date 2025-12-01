@@ -340,30 +340,6 @@ class TestContentUpdate:
         assert len(changes) == 1
 
 
-class TestSerialization:
-    """序列化测试"""
-
-    def test_to_dict_and_from_dict(self, pane):
-        """序列化往返"""
-        pane.handle_state_change(StateChange(
-            old_status=TaskStatus.IDLE,
-            new_status=TaskStatus.RUNNING,
-            old_source="shell",
-            new_source="shell",
-            description="test",
-            state_id=5,
-        ))
-        pane.update_content("", "hash456")
-
-        data = pane.to_dict()
-        restored = Pane.from_dict(data)
-
-        assert restored.pane_id == pane.pane_id
-        assert restored.status == pane.status
-        assert restored.state_id == pane.state_id
-        assert restored.content_hash == pane.content_hash
-
-
 class TestConvenienceMethods:
     """便捷方法测试"""
 

@@ -24,7 +24,7 @@ Signal Sources (shell | claude-code | iterm focus | frontend click | timer.check
 └──────────┬───────────────┘
            ▼
 ┌──────────────────────────┐
-│      StateManager        │ per-pane ActorQueue + cleanup/persist
+│      StateManager        │ per-pane ActorQueue + cleanup
 └──────────┬───────────────┘
            ▼
 ┌────────────────┐     ┌────────────────┐
@@ -84,7 +84,6 @@ src/termsupervisor/
 │   ├── transitions.py      # Rule table (WAITING→RUNNING, etc.)
 │   ├── pane.py             # Display (delay, notification suppression)
 │   ├── queue.py            # ActorQueue with generation/backpressure
-│   ├── persistence.py      # Versioned checksum save/load (v2)
 │   └── predicates.py, types.py
 ├── hooks/
 │   ├── manager.py          # HookManager facade (normalize/enqueue)
@@ -111,7 +110,7 @@ src/termsupervisor/
 - runtime/bootstrap builds the single Timer + HookManager + Sources stack; per-pane ActorQueue + generation gating are active.
 - WebSocket handler is JSON-only (`activate/rename/create_tab`); status changes broadcast from HookManager callback.
 - `supervisor.py` still uses PaneChangeQueue for content throttle; a dedicated content hook source is still pending.
-- Persistence (v2, checksum) is implemented but not auto-wired; restart resets state/history unless save/load is called.
+- State is in-memory only; restart resets all state/history.
 - Telemetry metrics are in-memory only (no Prometheus/StatsD sink yet).
 
 ## Install
@@ -152,7 +151,6 @@ Edit `src/termsupervisor/config.py`:
 
 ```python
 import os
-from pathlib import Path
 
 # === Polling / Debug ===
 POLL_INTERVAL = 1.0
@@ -181,7 +179,6 @@ TIMER_TICK_INTERVAL = 1.0
 # === State / Display ===
 LONG_RUNNING_THRESHOLD_SECONDS = 60.0
 STATE_HISTORY_MAX_LENGTH = 30
-STATE_HISTORY_PERSIST_LENGTH = 5
 DISPLAY_DELAY_SECONDS = 5.0
 NOTIFICATION_MIN_DURATION_SECONDS = 3.0
 FOCUS_DEBOUNCE_SECONDS = 2.0
@@ -190,11 +187,6 @@ FOCUS_DEBOUNCE_SECONDS = 2.0
 QUEUE_REFRESH_LINES = 5
 QUEUE_NEW_RECORD_LINES = 20
 QUEUE_FLUSH_TIMEOUT = 10.0
-
-# === Persistence ===
-PERSIST_DIR = Path(os.path.expanduser("~/.termsupervisor"))
-PERSIST_FILE = PERSIST_DIR / "state.json"
-PERSIST_VERSION = 2
 
 # === Logging / Metrics ===
 LOG_LEVEL = os.environ.get("TERMSUPERVISOR_LOG_LEVEL", "INFO")
@@ -225,6 +217,8 @@ See `hooks/claude-code/README.md` for details.
 | `make taillog` | Follow log |
 | `make loghook` | Monitor hook events |
 | `make logerr` | Monitor errors |
+| `make debug-states` | List all pane debug snapshots |
+| `make debug-state ID=<pane_id>` | View single pane state/queue details |
 | `make test` | Run pytest |
 | `make clean` | Clean logs and cache |
 

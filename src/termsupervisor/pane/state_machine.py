@@ -4,7 +4,6 @@
 - 维护 status/source/started_at/state_id/history
 - 根据流转表匹配规则
 - 匹配成功生成 StateChange 回调 Pane
-- 支持序列化/反序列化
 """
 
 import itertools
@@ -12,7 +11,7 @@ from collections import deque
 from datetime import datetime
 
 from ..telemetry import get_logger, metrics
-from ..config import STATE_HISTORY_MAX_LENGTH, STATE_HISTORY_PERSIST_LENGTH
+from ..config import STATE_HISTORY_MAX_LENGTH
 from .types import (
     TaskStatus,
     HookEvent,
@@ -265,62 +264,6 @@ class PaneStateMachine:
         if not self._history:
             return "  (no history)"
         return "\n".join(f"  {entry}" for entry in self._history)
-
-    # === 序列化 ===
-
-    def to_dict(self) -> dict:
-        """序列化为字典"""
-        return {
-            "pane_id": self.pane_id,
-            "status": self._status.value,
-            "source": self._source,
-            "started_at": self._started_at,
-            "state_id": self._state_id,
-            "pane_generation": self._pane_generation,
-            "description": self._description,
-            # 只持久化最近 N 条历史
-            "history": [
-                {
-                    "signal": e.signal,
-                    "from_status": e.from_status.value,
-                    "to_status": e.to_status.value,
-                    "success": e.success,
-                    "description": e.description,
-                    "timestamp": e.timestamp,
-                }
-                for e in list(self._history)[-STATE_HISTORY_PERSIST_LENGTH:]
-            ],
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "PaneStateMachine":
-        """从字典反序列化"""
-        machine = cls(
-            pane_id=data["pane_id"],
-            status=TaskStatus(data["status"]),
-            source=data["source"],
-            started_at=data.get("started_at"),
-            state_id=data.get("state_id"),
-            pane_generation=data.get("pane_generation", 1),
-        )
-        machine._description = data.get("description", "")
-
-        # 恢复历史
-        for h in data.get("history", []):
-            entry = StateHistoryEntry(
-                signal=h["signal"],
-                from_status=TaskStatus(h["from_status"]),
-                to_status=TaskStatus(h["to_status"]),
-                success=h["success"],
-                description=h.get("description", ""),
-                timestamp=h.get("timestamp", 0.0),
-            )
-            machine._history.append(entry)
-
-        # 加载后递增 generation（避免旧事件干扰）
-        machine.increment_generation()
-
-        return machine
 
     # === 便捷方法 ===
 

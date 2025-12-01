@@ -9,7 +9,6 @@ from termsupervisor.pane import (
     TaskStatus,
     HookEvent,
     StateManager,
-    persistence,
 )
 from termsupervisor.timer import Timer
 from termsupervisor.telemetry import metrics
@@ -229,123 +228,6 @@ class TestCallbacks:
 
         assert len(changes) == 1
         assert changes[0]["status"] == TaskStatus.RUNNING
-
-
-class TestPersistence:
-    """持久化测试"""
-
-    def test_save_and_load(self, manager, tmp_path):
-        """保存和加载"""
-        # 创建一些状态
-        machine, _ = manager.get_or_create("test-pane-1")
-        machine.process(HookEvent(
-            source="shell",
-            pane_id="test-pane-1",
-            event_type="command_start",
-            data={"command": "ls"},
-            pane_generation=machine.pane_generation,
-        ))
-
-        # 保存
-        path = tmp_path / "state.json"
-        machines = {pid: m.to_dict() for pid, m in manager._machines.items()}
-        panes = {pid: p.to_dict() for pid, p in manager._panes.items()}
-        persistence.save(machines, panes, path)
-
-        # 创建新 manager 并加载
-        new_manager = StateManager()
-        result = persistence.load(path)
-        assert result is not None
-
-        machines_data, panes_data = result
-        assert "test-pane-1" in machines_data
-
-    def test_corrupted_file_skipped(self, tmp_path):
-        """损坏的文件被跳过"""
-        path = tmp_path / "corrupted.json"
-        path.write_text("invalid json{}")
-
-        result = persistence.load(path)
-        assert result is None
-
-    def test_version_mismatch_skipped(self, tmp_path):
-        """版本不匹配被跳过"""
-        path = tmp_path / "old_version.json"
-        import json
-        path.write_text(json.dumps({
-            "version": 1,  # 旧版本
-            "machines": {},
-            "panes": {},
-        }))
-
-        result = persistence.load(path, version=2)
-        assert result is None
-
-    def test_generation_bump_after_load(self, manager, timer, tmp_path):
-        """加载后 generation 递增"""
-        # 创建状态
-        machine, _ = manager.get_or_create("test-pane-1")
-        original_gen = machine.pane_generation
-
-        # 保存
-        path = tmp_path / "state.json"
-        machines = {pid: m.to_dict() for pid, m in manager._machines.items()}
-        panes = {pid: p.to_dict() for pid, p in manager._panes.items()}
-        persistence.save(machines, panes, path)
-
-        # 创建新 manager 并加载
-        new_manager = StateManager(timer=timer)
-        result = persistence.load(path)
-        assert result is not None
-
-        machines_data, _ = result
-        from termsupervisor.pane.state_machine import PaneStateMachine
-        restored = PaneStateMachine.from_dict(machines_data["test-pane-1"])
-
-        # generation 应该增加
-        assert restored.pane_generation == original_gen + 1
-
-    def test_no_double_long_running_on_load(self, manager, timer, tmp_path):
-        """加载 LONG_RUNNING 状态后不重复触发"""
-        # 创建 LONG_RUNNING 状态
-        machine, _ = manager.get_or_create("test-pane-1")
-        machine.process(HookEvent(
-            source="shell",
-            pane_id="test-pane-1",
-            event_type="command_start",
-            data={"command": "sleep 100"},
-            pane_generation=machine.pane_generation,
-        ))
-        # 手动触发 LONG_RUNNING
-        import time
-        machine._started_at = time.time() - 100
-        manager.tick_all()
-        assert machine.status == TaskStatus.LONG_RUNNING
-
-        # 保存
-        path = tmp_path / "state.json"
-        machines = {pid: m.to_dict() for pid, m in manager._machines.items()}
-        panes = {pid: p.to_dict() for pid, p in manager._panes.items()}
-        persistence.save(machines, panes, path)
-
-        # 创建新 manager 并加载
-        new_manager = StateManager(timer=timer)
-        result = persistence.load(path)
-        machines_data, panes_data = result
-
-        # 恢复状态
-        from termsupervisor.pane.state_machine import PaneStateMachine
-        from termsupervisor.pane.pane import Pane
-        restored_machine = PaneStateMachine.from_dict(machines_data["test-pane-1"])
-        new_manager._machines["test-pane-1"] = restored_machine
-        new_manager._pane_generations["test-pane-1"] = restored_machine.pane_generation
-
-        # 状态应该是 LONG_RUNNING
-        assert restored_machine.status == TaskStatus.LONG_RUNNING
-
-        # tick_all 不应该再次触发（因为状态已经是 LONG_RUNNING，不是 RUNNING）
-        triggered = new_manager.tick_all()
-        assert "test-pane-1" not in triggered
 
 
 class TestGeneration:

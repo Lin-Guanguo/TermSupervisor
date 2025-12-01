@@ -30,7 +30,6 @@ from .state_machine import PaneStateMachine
 from .pane import Pane
 from .queue import ActorQueue, EventQueue
 from .manager import StateManager
-from . import persistence
 
 __all__ = [
     # Types
@@ -58,6 +57,4 @@ __all__ = [
     "EventQueue",
     # Manager
     "StateManager",
-    # Persistence
-    "persistence",
 ]

@@ -1,6 +1,6 @@
 # Mnema - TermSupervisor 项目文档
 
-Last Updated: 2025-11-30
+Last Updated: 2025-12-01
 
 ## 文件列表
 
@@ -8,6 +8,7 @@ Last Updated: 2025-11-30
 |------|------|
 | `architecture.md` | **当前架构**：文件结构、模块调用关系图、数据流、状态机、配置项 |
 | `_root_AGENTS.md` | 项目 Agent 配置说明 |
+| `content-heuristic.md` | Content-based heuristic to clear RUNNING/LONG_RUNNING panes without `command_end` hooks |
 | `state-machine-design.md` | **设计讨论**：状态机设计、事件清单、状态消失规则、优先级覆盖 |
 | `hook-system-design.md` | Hook 系统设计：接收外部工具状态事件，支持 Claude Code 等多种 Hook 源 |
 | `notification-refresh-refactor.md` | ~~重构完成~~（已过时，被 architecture.md 取代） |

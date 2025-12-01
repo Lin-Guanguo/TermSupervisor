@@ -5,7 +5,6 @@
 - 绑定回调
 - 处理事件（通过 actor 队列串行化）
 - 轮询 LONG_RUNNING
-- 持久化
 - 清理过期 pane
 """
 
@@ -24,7 +23,6 @@ from .types import TaskStatus, HookEvent, StateChange, DisplayState
 from .state_machine import PaneStateMachine
 from .pane import Pane
 from .queue import EventQueue
-from . import persistence
 
 if TYPE_CHECKING:
     from ..timer import Timer
@@ -593,7 +591,8 @@ class StateManager:
         pane = self._panes.get(pane_id)
         queue = self._queues.get(pane_id)
 
-        if not machine or not pane or not queue:
+        # 注意：用 is None 而不是 not，因为 EventQueue.__bool__ 在队列为空时返回 False
+        if machine is None or pane is None or queue is None:
             return None
 
         waiting_info = None
@@ -661,7 +660,8 @@ class StateManager:
             pane = self._panes.get(pane_id)
             queue = self._queues.get(pane_id)
 
-            if not machine or not pane or not queue:
+            # 注意：用 is None 而不是 not，因为 EventQueue.__bool__ 在队列为空时返回 False
+            if machine is None or pane is None or queue is None:
                 continue
 
             display = pane.get_display_dict()
@@ -719,52 +719,3 @@ class StateManager:
             self.remove_pane(pane_id)
 
         return list(closed)
-
-    # === 持久化 ===
-
-    def save(self) -> bool:
-        """保存状态"""
-        machines = {pid: m.to_dict() for pid, m in self._machines.items()}
-        panes = {pid: p.to_dict() for pid, p in self._panes.items()}
-        return persistence.save(machines, panes)
-
-    def load(self) -> bool:
-        """加载状态"""
-        result = persistence.load()
-        if result is None:
-            return False
-
-        machines_data, panes_data = result
-
-        # 恢复状态机（不再设置回调，StateManager 直接调用）
-        for pane_id, data in machines_data.items():
-            machine = PaneStateMachine.from_dict(data)
-            self._machines[pane_id] = machine
-            self._pane_generations[pane_id] = machine.pane_generation
-
-        # 恢复 Pane
-        for pane_id, data in panes_data.items():
-            pane = Pane.from_dict(data, self._timer, self._focus_checker)
-            self._panes[pane_id] = pane
-
-            # 重新绑定回调
-            pane.set_on_display_change(
-                lambda state, pid=pane_id: self._on_pane_display_change(pid, state)
-            )
-
-        # 创建队列
-        for pane_id in self._machines.keys():
-            if pane_id not in self._queues:
-                machine = self._machines[pane_id]
-                queue = EventQueue(pane_id)
-                queue.set_current_generation(self._pane_generations.get(pane_id, 1))
-                queue.set_current_state_id(machine.state_id)
-                # 绑定队列调试回调
-                if self._on_debug_event:
-                    queue.set_on_debug_event(self._on_debug_event)
-                self._queues[pane_id] = queue
-
-        logger.info(
-            f"[StateManager] Loaded {len(self._machines)} machines, {len(self._panes)} panes"
-        )
-        return True

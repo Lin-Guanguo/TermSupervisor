@@ -1,7 +1,8 @@
-.PHONY: run rerun run-web run-cli stop viewlog taillog loghook logerr clean test help
+.PHONY: run rerun run-web run-cli stop viewlog taillog loghook logerr debug-states debug-state clean test help
 
 LOG_FILE = server.log
 PROC_NAME = termsupervisor
+DEBUG_BASE = http://localhost:8765
 
 # 后台运行 Web 服务
 run:
@@ -70,6 +71,26 @@ logerr:
 		tail -f $(LOG_FILE) | while IFS= read -r line; do echo "$$line" | grep -qiE "error|exception|traceback|failed" && echo "$$line"; done; \
 	else \
 		echo "No log file found"; \
+	fi
+
+# 调试：列出所有 pane 调试快照（参考 README）
+debug-states:
+	@resp=$$(curl -sf "$(DEBUG_BASE)/api/debug/states") || { \
+		echo "debug-states: failed to reach $(DEBUG_BASE) (server down or sandbox blocked)"; \
+		exit 1; \
+	}; \
+	echo "$$resp" | jq '.states[] | {pane_id,status,source,queue_depth,latest_history: .latest_history[0]}'
+
+# 调试：查看单个 pane 状态机/队列详情，ID=<pane_id>（参考 README）
+debug-state:
+	@if [ -z "$(ID)" ]; then \
+		echo "Usage: make debug-state ID=<pane_id> [HIST=20] [PENDING=10]"; \
+	else \
+		resp=$$(curl -sf "$(DEBUG_BASE)/api/debug/state/$(ID)?max_history=$${HIST:-20}&max_pending_events=$${PENDING:-10}") || { \
+			echo "debug-state: failed to reach $(DEBUG_BASE) (server down or sandbox blocked)"; \
+			exit 1; \
+		}; \
+		echo "$$resp" | jq '.'; \
 	fi
 
 # 运行测试

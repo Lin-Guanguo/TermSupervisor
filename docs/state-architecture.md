@@ -101,13 +101,6 @@ Last Updated: 2025-11-30
 │                                    │ - Notifications                │               │
 │                                    └────────────────────────────────┘               │
 │                                                                                      │
-│  ┌────────────────────────────────────────────────────────────────────────────────┐ │
-│  │                          Persistence (未激活)                                  │ │
-│  │                                                                                │ │
-│  │  pane/persistence.py: v2 + checksum, temp+rename writes                       │ │
-│  │  (save/load 已实现但运行时未调用)                                               │ │
-│  └────────────────────────────────────────────────────────────────────────────────┘ │
-│                                                                                      │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -491,7 +484,6 @@ Last Updated: 2025-11-30
 │  │  - Queue sizes (256 max)                                           │     │
 │  │  - Display delays (5s)                                             │     │
 │  │  - Notification suppression (3s)                                   │     │
-│  │  - Persistence paths and versions                                  │     │
 │  │                                                                    │     │
 │  │  Used by: nearly all modules                                       │     │
 │  └───────────────────────────────────────────────────────────────────┘     │
@@ -519,20 +511,6 @@ Last Updated: 2025-11-30
 │  │    Creates: Timer, HookManager, Sources, Receiver                  │     │
 │  │  - get_current_components() → access existing instance             │     │
 │  │  - Prevents dual-construction (raises RuntimeError)                │     │
-│  └───────────────────────────────────────────────────────────────────┘     │
-│                                                                             │
-│  ┌───────────────────────────────────────────────────────────────────┐     │
-│  │                      pane/persistence.py                          │     │
-│  │                                                                    │     │
-│  │  Atomic state persistence:                                         │     │
-│  │  - save(machines, panes): JSON → temp → atomic rename             │     │
-│  │  - load(): 加载 + 校验 version & checksum                          │     │
-│  │  - delete(): 删除状态文件                                          │     │
-│  │                                                                    │     │
-│  │  Format: v2 JSON                                                   │     │
-│  │  {"version", "saved_at", "machines", "panes", "checksum"}         │     │
-│  │                                                                    │     │
-│  │  Status: 已实现，运行时未激活                                       │     │
 │  └───────────────────────────────────────────────────────────────────┘     │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -742,7 +720,7 @@ Pane._register_delayed_display()
                              │                                        │
            ┌─────────────────┼─────────────────┐                     │
            ▼                 ▼                 ▼                     │
-    pane/persistence.py  iterm/utils.py  hooks/manager.py ───────────┘
+                         iterm/utils.py  hooks/manager.py ───────────┘
                                                │
                                                ▼
                                        supervisor.py
@@ -784,7 +762,6 @@ iterm/:
 | `pane/pane.py` | 显示层 (延迟/通知抑制) |
 | `pane/queue.py` | Actor queue |
 | `pane/manager.py` | StateManager 协调器 |
-| `pane/persistence.py` | 状态持久化 (v2) |
 | `hooks/manager.py` | HookManager facade |
 | `hooks/receiver.py` | HTTP API 接收器 |
 | `hooks/sources/base.py` | Hook source 基类 |
@@ -874,7 +851,7 @@ External Event → Hook Source → HookManager.normalize_event()
 
 ## 现存特点与限制
 
-- **持久化**：v2 + checksum 已实现（`pane/persistence.py`），但运行时未调用 save/load，重启会丢状态/历史。
+- **状态**：纯内存，重启会丢状态/历史。
 - **队列**：ActorQueue generation 过滤 + 丢弃最旧（满 256），打点 `queue.dropped`；state_id 乱序仅在 Pane 显示层防护。
 - **Telemetry**：仅内存指标（inc/gauge）；未接 Prometheus/StatsD。
 - **内容路径**：PaneChangeQueue 仍在用，尚未迁移到 hooks/sources/content.py；analyzer 兼容层保留但不参与状态决策。
