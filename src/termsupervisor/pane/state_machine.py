@@ -121,7 +121,13 @@ class PaneStateMachine:
                 f"generation {event.pane_generation} < {self._pane_generation}"
             )
             metrics.inc("transition.stale_generation", {"pane": pane_short})
-            self._add_history(signal, self._status, self._status, success=False)
+            self._add_history(
+                signal,
+                self._status,
+                self._status,
+                success=False,
+                description="stale_generation",
+            )
             return None
 
         # 2. 查找所有可能匹配的规则
@@ -129,7 +135,13 @@ class PaneStateMachine:
 
         if not rules:
             logger.debug(f"[SM:{pane_short}] No rule matched for {signal}")
-            self._add_history(signal, self._status, self._status, success=False)
+            self._add_history(
+                signal,
+                self._status,
+                self._status,
+                success=False,
+                description="no_rule_matched",
+            )
             return None
 
         # 3. 构建状态快照
@@ -151,7 +163,13 @@ class PaneStateMachine:
 
         if rule is None:
             logger.debug(f"[SM:{pane_short}] All predicates failed for {signal}")
-            self._add_history(signal, self._status, self._status, success=False)
+            self._add_history(
+                signal,
+                self._status,
+                self._status,
+                success=False,
+                description="predicate_failed",
+            )
             metrics.inc("transition.predicate_fail", {"pane": pane_short})
             return None
 

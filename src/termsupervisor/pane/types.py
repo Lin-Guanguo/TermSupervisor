@@ -135,6 +135,17 @@ class StateHistoryEntry:
         mark = "✓" if self.success else "✗"
         return f"{ts} | {mark} {self.signal} → {self.to_status.value}"
 
+    def to_dict(self) -> dict:
+        """转换为可序列化的字典"""
+        return {
+            "signal": self.signal,
+            "from_status": self.from_status.value,
+            "to_status": self.to_status.value,
+            "success": self.success,
+            "description": self.description,
+            "timestamp": self.timestamp,
+        }
+
 
 @dataclass
 class StateChange:
@@ -175,6 +186,8 @@ class DisplayState:
     started_at: float | None = None
     running_duration: float = 0.0
     content_hash: str = ""
+    recently_finished: bool = False  # 最近完成提示（auto-dismiss 后短暂显示）
+    quiet_completion: bool = False  # 静默完成（短任务不闪烁）
 
     def to_dict(self) -> dict:
         """转换为字典（用于 WebSocket）"""
@@ -189,6 +202,8 @@ class DisplayState:
             "needs_attention": self.status.needs_attention,
             "display": self.status.display,
             "running_duration": self.running_duration,
+            "recently_finished": self.recently_finished,
+            "quiet_completion": self.quiet_completion,
         }
 
 

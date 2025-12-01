@@ -20,7 +20,12 @@ from ..hooks.receiver import HookReceiver
 from ..hooks.sources.shell import ShellHookSource
 from ..hooks.sources.claude_code import ClaudeCodeHookSource
 from ..hooks.sources.iterm import ItermHookSource
-from ..config import TIMER_TICK_INTERVAL
+from ..config import (
+    TIMER_TICK_INTERVAL,
+    PERSIST_ENABLED,
+    PERSIST_INTERVAL_SECONDS,
+    PERSIST_LOAD_ON_STARTUP,
+)
 from ..telemetry import get_logger
 
 if TYPE_CHECKING:
@@ -42,6 +47,7 @@ class RuntimeComponents:
     shell_source: ShellHookSource
     claude_code_source: ClaudeCodeHookSource
     iterm_source: ItermHookSource
+    _persistence_enabled: bool = False
 
     async def start_sources(self) -> None:
         """启动所有 source（Supervisor 启动后调用）"""
@@ -56,6 +62,51 @@ class RuntimeComponents:
         await self.claude_code_source.stop()
         await self.iterm_source.stop()
         logger.info("[Bootstrap] All sources stopped")
+
+    def load_state(self) -> bool:
+        """加载持久化状态
+
+        Returns:
+            是否成功加载
+        """
+        if not self._persistence_enabled:
+            return False
+
+        state_manager = self.hook_manager._state_manager
+        success = state_manager.load()
+        if success:
+            logger.info("[Bootstrap] State loaded from persistence")
+        return success
+
+    def save_state(self) -> bool:
+        """保存状态到持久化
+
+        Returns:
+            是否成功保存
+        """
+        if not self._persistence_enabled:
+            return False
+
+        state_manager = self.hook_manager._state_manager
+        success = state_manager.save()
+        if success:
+            logger.debug("[Bootstrap] State saved to persistence")
+        return success
+
+    def shutdown_save(self) -> bool:
+        """关闭时保存状态（best-effort）
+
+        Returns:
+            是否成功
+        """
+        if not self._persistence_enabled:
+            return False
+
+        try:
+            return self.save_state()
+        except Exception as e:
+            logger.warning(f"[Bootstrap] Shutdown save failed: {e}")
+            return False
 
 
 def bootstrap(
@@ -117,7 +168,21 @@ def bootstrap(
         shell_source=shell_source,
         claude_code_source=claude_code_source,
         iterm_source=iterm_source,
+        _persistence_enabled=PERSIST_ENABLED,
     )
+
+    # 7. 持久化：加载状态（如果启用）
+    if PERSIST_ENABLED and PERSIST_LOAD_ON_STARTUP:
+        _current_components.load_state()
+
+    # 8. 持久化：注册周期性保存（如果启用）
+    if PERSIST_ENABLED and PERSIST_INTERVAL_SECONDS > 0:
+        timer.register_interval(
+            "persist_save",
+            PERSIST_INTERVAL_SECONDS,
+            _current_components.save_state,
+        )
+        logger.info(f"[Bootstrap] Periodic save registered ({PERSIST_INTERVAL_SECONDS}s)")
 
     return _current_components
 

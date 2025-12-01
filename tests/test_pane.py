@@ -413,3 +413,141 @@ class TestConvenienceMethods:
         assert d["status"] == "running"
         assert d["is_running"] is True
         assert d["description"] == "test"
+
+
+class TestAutoDismiss:
+    """Auto-dismiss 测试（Phase 1）"""
+
+    def test_done_registers_auto_dismiss(self, pane, timer):
+        """DONE 状态注册 auto-dismiss 定时器"""
+        pane.handle_state_change(StateChange(
+            old_status=TaskStatus.IDLE,
+            new_status=TaskStatus.DONE,
+            old_source="shell",
+            new_source="shell",
+            description="done",
+            state_id=1,
+            running_duration=10.0,
+        ))
+
+        assert pane.status == TaskStatus.DONE
+        auto_dismiss_name = f"pane_auto_dismiss_{pane.pane_id[:8]}"
+        assert timer.has_delay(auto_dismiss_name)
+
+    def test_failed_registers_auto_dismiss(self, pane, timer):
+        """FAILED 状态注册 auto-dismiss 定时器"""
+        pane.handle_state_change(StateChange(
+            old_status=TaskStatus.IDLE,
+            new_status=TaskStatus.FAILED,
+            old_source="shell",
+            new_source="shell",
+            description="failed",
+            state_id=1,
+            running_duration=10.0,
+        ))
+
+        assert pane.status == TaskStatus.FAILED
+        auto_dismiss_name = f"pane_auto_dismiss_{pane.pane_id[:8]}"
+        assert timer.has_delay(auto_dismiss_name)
+
+    def test_new_state_cancels_auto_dismiss(self, pane, timer):
+        """新状态变化取消 auto-dismiss 定时器"""
+        pane.handle_state_change(StateChange(
+            old_status=TaskStatus.IDLE,
+            new_status=TaskStatus.DONE,
+            old_source="shell",
+            new_source="shell",
+            description="done",
+            state_id=1,
+        ))
+
+        auto_dismiss_name = f"pane_auto_dismiss_{pane.pane_id[:8]}"
+        assert timer.has_delay(auto_dismiss_name)
+
+        # 新命令开始，取消 auto-dismiss
+        pane.handle_state_change(StateChange(
+            old_status=TaskStatus.DONE,
+            new_status=TaskStatus.RUNNING,
+            old_source="shell",
+            new_source="shell",
+            description="new cmd",
+            state_id=2,
+        ))
+
+        assert not timer.has_delay(auto_dismiss_name)
+
+    def test_running_no_auto_dismiss(self, pane, timer):
+        """RUNNING 状态不注册 auto-dismiss"""
+        pane.handle_state_change(StateChange(
+            old_status=TaskStatus.IDLE,
+            new_status=TaskStatus.RUNNING,
+            old_source="shell",
+            new_source="shell",
+            description="running",
+            state_id=1,
+        ))
+
+        auto_dismiss_name = f"pane_auto_dismiss_{pane.pane_id[:8]}"
+        assert not timer.has_delay(auto_dismiss_name)
+
+
+class TestQuietCompletion:
+    """静默完成测试（Phase 1）"""
+
+    def test_short_task_quiet_completion(self, pane):
+        """短任务标记为 quiet_completion"""
+        pane.handle_state_change(StateChange(
+            old_status=TaskStatus.IDLE,
+            new_status=TaskStatus.DONE,
+            old_source="shell",
+            new_source="shell",
+            description="done",
+            state_id=1,
+            running_duration=1.0,  # < 3s
+        ))
+
+        assert pane.display_state.quiet_completion is True
+
+    def test_long_task_no_quiet_completion(self, pane):
+        """长任务不标记为 quiet_completion"""
+        pane.handle_state_change(StateChange(
+            old_status=TaskStatus.IDLE,
+            new_status=TaskStatus.DONE,
+            old_source="shell",
+            new_source="shell",
+            description="done",
+            state_id=1,
+            running_duration=10.0,  # > 3s
+        ))
+
+        assert pane.display_state.quiet_completion is False
+
+    def test_quiet_completion_in_display_dict(self, pane):
+        """quiet_completion 出现在 display_dict 中"""
+        pane.handle_state_change(StateChange(
+            old_status=TaskStatus.IDLE,
+            new_status=TaskStatus.DONE,
+            old_source="shell",
+            new_source="shell",
+            description="done",
+            state_id=1,
+            running_duration=1.0,
+        ))
+
+        d = pane.get_display_dict()
+        assert "quiet_completion" in d
+        assert d["quiet_completion"] is True
+
+
+class TestRecentlyFinishedHint:
+    """recently_finished 提示测试（Phase 1）"""
+
+    def test_recently_finished_default_false(self, pane):
+        """recently_finished 默认为 False"""
+        assert pane.display_state.recently_finished is False
+
+    def test_recently_finished_in_display_dict(self, pane):
+        """recently_finished 出现在 display_dict 中"""
+        d = pane.get_display_dict()
+        assert "recently_finished" in d
+        assert d["recently_finished"] is False

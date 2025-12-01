@@ -140,6 +140,12 @@ make logerr       # Monitor errors only
 
 Open http://localhost:8765
 
+### Debugging State Pipeline
+
+- New: `GET /api/debug/state/{session_id}?max_history=30&max_pending_events=10` (FastAPI). Returns status machine snapshot (status/source/state_id/description), display state, queue snapshot (depth, drops, pending signals), WAITING fallback info, recent history with failure reasons (`stale_generation`, `no_rule_matched`, `predicate_failed`), and current content hash. Use to see why a signal did or didn’t transition.
+- Existing: `make loghook` to watch hook events, `make logerr` for errors, `make taillog` for server.log.
+- Existing: In REPL/backend, `hook_manager.print_history(<pane_id>)` or `hook_manager.get_history(<pane_id>)` for recent transitions; `hook_manager.print_all_states()` to see tracked panes.
+
 ## Configuration
 
 Edit `src/termsupervisor/config.py`:

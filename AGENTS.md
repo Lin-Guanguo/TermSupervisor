@@ -6,7 +6,7 @@ TermSupervisor monitors iTerm2 pane content and mirrors the layout on a real-tim
 
 - **Core:** iTerm2 layout mirror with per-pane state pipeline; content changes filtered by ContentCleaner + PaneChangeQueue throttling.
 - **Architecture:** HookManager → StateManager (per-pane ActorQueue) → PaneStateMachine → Pane display (delay + notification suppression) with Timer handling LONG_RUNNING + delayed clears; layout/SVG rendered to a vanilla HTML/JS WebSocket dashboard.
-- **Hooks/UI:** Shell PromptMonitor, Claude Code HTTP hook, iTerm FocusMonitor (2s debounce); `content.changed` comes from polling; frontend actions are JSON (`activate/rename/create_tab`, tabs-per-row & hidden-tab controls).
+- **Hooks/UI:** Shell PromptMonitor, Claude Code HTTP hook, iTerm FocusMonitor (2s debounce); `content.update` comes from polling; frontend actions are JSON (`activate/rename/create_tab`, tabs-per-row & hidden-tab controls).
 - **Docs:** `docs/state-architecture.md`; design source `mnema/state-architecture/`; hook notes `docs/hook-manager-refactor.md`.
 
 ## Building and Running
@@ -34,7 +34,7 @@ src/termsupervisor/
 ├── config.py               # Configuration constants
 ├── telemetry.py            # Logger + in-memory metrics facade
 ├── timer.py                # Interval/delay scheduler (LONG_RUNNING + display delay)
-├── supervisor.py           # 1s polling + content.changed emission + layout mirror
+├── supervisor.py           # 1s polling + content.update emission + layout mirror
 ├── runtime/                # Bootstrap + lifecycle
 │   └── bootstrap.py        # Centralized component construction (Timer, HookManager, Sources)
 ├── pane/                   # State architecture
@@ -68,11 +68,11 @@ src/termsupervisor/
 
 - `src/termsupervisor/runtime/bootstrap.py`: centralized component construction (Timer, HookManager, Sources, Receiver).
 - `src/termsupervisor/hooks/manager.py`: `emit_event()` unified entry, enqueue → StateManager, user/focus/click helpers.
-- `src/termsupervisor/pane/manager.py`: per-pane ActorQueue, LONG_RUNNING tick, content.changed fallback, display callback.
+- `src/termsupervisor/pane/manager.py`: per-pane ActorQueue, LONG_RUNNING tick, content.update fallback, display callback.
 - `src/termsupervisor/pane/state_machine.py`: transition processing/history/state_id; predicates in `pane/predicates.py`.
 - `src/termsupervisor/pane/pane.py`: DONE/FAILED→IDLE delayed 5s, notification suppression (<3s or focused), content hash broadcast.
 - `src/termsupervisor/timer.py`: interval + delay scheduler (async/sync), `timer.errors` metric.
-- `src/termsupervisor/supervisor.py`: layout mirror, PaneChangeQueue-based throttle, emits `content.changed` to HookManager.
+- `src/termsupervisor/supervisor.py`: layout mirror, PaneChangeQueue-based throttle, emits `content.update` to HookManager.
 - `src/termsupervisor/iterm/models.py`: Layout DTOs (LayoutData, WindowInfo, TabInfo, PaneInfo, PaneSnapshot).
 - `src/termsupervisor/analysis/change_queue.py`: Content throttle DTOs (PaneChangeQueue, ChangeRecord, PaneChange, PaneHistory).
 - `docs/state-architecture.md`: current architecture summary.
@@ -106,14 +106,16 @@ Rule table excerpt (see `pane/transitions.py`):
 | T1 | RUNNING | = | timer.check | LONG_RUNNING | = | 已运行 {elapsed} | N | StateManager 发出 |
 | U1 | WAITING_APPROVAL | * | iterm.focus / frontend.click_pane | IDLE | user |  | Y | 立即流转 |
 | U2 | DONE \| FAILED | * | iterm.focus / frontend.click_pane | IDLE | user |  | Y | 立即流转，显示延迟 |
-| R1 | WAITING_APPROVAL | * | content.changed | RUNNING | = | 内容变化，恢复执行 | N | 始终渲染 Pane |
+| R1 | WAITING_APPROVAL | * | content.update | RUNNING | = | 内容变化，恢复执行 | N | 始终渲染 Pane |
+| T2 | WAITING_APPROVAL | * | timer.waiting_fallback_running | RUNNING | = | 超时恢复（有内容变化） | N | WAITING 超时 fallback |
+| T3 | WAITING_APPROVAL | * | timer.waiting_fallback_idle | IDLE | = | 超时恢复（无内容变化） | Y | WAITING 超时 fallback |
 
 Signal format: `{source}.{event_type}` (e.g., `shell.command_start`, `claude-code.Stop`)
 
 ## Content Change Detection
 
 ```
-1s Polling → ContentCleaner → PaneChangeQueue → SVG Refresh + content.changed → HookManager
+1s Polling → ContentCleaner → PaneChangeQueue → SVG Refresh + content.update → HookManager
                   │                  │
                   │                  ├── Refresh: ≥5 lines or 10s timeout
                   │                  └── Queue push: ≥20 lines

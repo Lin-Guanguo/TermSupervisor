@@ -115,8 +115,24 @@ class TestEventProcessing:
         result = manager.enqueue(event)
         assert result is False
 
-    async def test_content_changed_updates_pane(self, manager):
-        """content.changed 更新 Pane 内容"""
+    async def test_content_update_updates_pane(self, manager):
+        """content.update 更新 Pane 内容"""
+        event = HookEvent(
+            source="content",
+            pane_id="test-pane",
+            event_type="update",
+            data={"content": "new content", "content_hash": "hash123"},
+        )
+
+        manager.enqueue(event)
+        await manager.process_queued()
+
+        pane = manager.get_pane("test-pane")
+        assert pane.content == "new content"
+        assert pane.content_hash == "hash123"
+
+    async def test_content_changed_updates_pane_compat(self, manager):
+        """content.changed（兼容）更新 Pane 内容"""
         event = HookEvent(
             source="content",
             pane_id="test-pane",
@@ -131,8 +147,8 @@ class TestEventProcessing:
         assert pane.content == "new content"
         assert pane.content_hash == "hash123"
 
-    async def test_content_changed_fallback_waiting_to_running(self, manager):
-        """content.changed 在 WAITING 时触发兜底恢复"""
+    async def test_content_update_fallback_waiting_to_running(self, manager):
+        """content.update 在 WAITING 时触发兜底恢复"""
         # 先进入 WAITING 状态
         manager.enqueue(HookEvent(
             source="claude-code",
@@ -142,11 +158,11 @@ class TestEventProcessing:
         await manager.process_queued()
         assert manager.get_status("test-pane") == TaskStatus.WAITING_APPROVAL
 
-        # content.changed 应该触发兜底恢复
+        # content.update 应该触发兜底恢复
         manager.enqueue(HookEvent(
             source="content",
             pane_id="test-pane",
-            event_type="changed",
+            event_type="update",
             data={"content": "output"},
         ))
         await manager.process_queued()
@@ -265,6 +281,72 @@ class TestPersistence:
         result = persistence.load(path, version=2)
         assert result is None
 
+    def test_generation_bump_after_load(self, manager, timer, tmp_path):
+        """加载后 generation 递增"""
+        # 创建状态
+        machine, _ = manager.get_or_create("test-pane-1")
+        original_gen = machine.pane_generation
+
+        # 保存
+        path = tmp_path / "state.json"
+        machines = {pid: m.to_dict() for pid, m in manager._machines.items()}
+        panes = {pid: p.to_dict() for pid, p in manager._panes.items()}
+        persistence.save(machines, panes, path)
+
+        # 创建新 manager 并加载
+        new_manager = StateManager(timer=timer)
+        result = persistence.load(path)
+        assert result is not None
+
+        machines_data, _ = result
+        from termsupervisor.pane.state_machine import PaneStateMachine
+        restored = PaneStateMachine.from_dict(machines_data["test-pane-1"])
+
+        # generation 应该增加
+        assert restored.pane_generation == original_gen + 1
+
+    def test_no_double_long_running_on_load(self, manager, timer, tmp_path):
+        """加载 LONG_RUNNING 状态后不重复触发"""
+        # 创建 LONG_RUNNING 状态
+        machine, _ = manager.get_or_create("test-pane-1")
+        machine.process(HookEvent(
+            source="shell",
+            pane_id="test-pane-1",
+            event_type="command_start",
+            data={"command": "sleep 100"},
+            pane_generation=machine.pane_generation,
+        ))
+        # 手动触发 LONG_RUNNING
+        import time
+        machine._started_at = time.time() - 100
+        manager.tick_all()
+        assert machine.status == TaskStatus.LONG_RUNNING
+
+        # 保存
+        path = tmp_path / "state.json"
+        machines = {pid: m.to_dict() for pid, m in manager._machines.items()}
+        panes = {pid: p.to_dict() for pid, p in manager._panes.items()}
+        persistence.save(machines, panes, path)
+
+        # 创建新 manager 并加载
+        new_manager = StateManager(timer=timer)
+        result = persistence.load(path)
+        machines_data, panes_data = result
+
+        # 恢复状态
+        from termsupervisor.pane.state_machine import PaneStateMachine
+        from termsupervisor.pane.pane import Pane
+        restored_machine = PaneStateMachine.from_dict(machines_data["test-pane-1"])
+        new_manager._machines["test-pane-1"] = restored_machine
+        new_manager._pane_generations["test-pane-1"] = restored_machine.pane_generation
+
+        # 状态应该是 LONG_RUNNING
+        assert restored_machine.status == TaskStatus.LONG_RUNNING
+
+        # tick_all 不应该再次触发（因为状态已经是 LONG_RUNNING，不是 RUNNING）
+        triggered = new_manager.tick_all()
+        assert "test-pane-1" not in triggered
+
 
 class TestGeneration:
     """Generation 测试"""
@@ -296,3 +378,224 @@ class TestQueueBehavior:
         # 处理所有
         count = await manager.process_queued()
         assert count == 5
+
+
+class TestWaitingFallback:
+    """WAITING fallback 测试（Phase 2）"""
+
+    async def test_waiting_fallback_tracks_entry(self, manager):
+        """进入 WAITING 状态时记录 fallback 信息"""
+        manager.enqueue(HookEvent(
+            source="claude-code",
+            pane_id="test-pane",
+            event_type="Notification:permission_prompt",
+        ))
+        await manager.process_queued()
+
+        assert manager.get_status("test-pane") == TaskStatus.WAITING_APPROVAL
+        assert "test-pane" in manager._waiting_fallback
+
+    async def test_waiting_fallback_cleared_on_resume(self, manager):
+        """WAITING 恢复后清除 fallback 跟踪"""
+        # 进入 WAITING
+        manager.enqueue(HookEvent(
+            source="claude-code",
+            pane_id="test-pane",
+            event_type="Notification:permission_prompt",
+        ))
+        await manager.process_queued()
+        assert "test-pane" in manager._waiting_fallback
+
+        # content 恢复
+        manager.enqueue(HookEvent(
+            source="content",
+            pane_id="test-pane",
+            event_type="update",
+            data={"content": "output"},
+        ))
+        await manager.process_queued()
+
+        assert "test-pane" not in manager._waiting_fallback
+
+    async def test_waiting_fallback_cleared_on_user_action(self, manager):
+        """用户操作清除 WAITING 后，fallback 跟踪也清除"""
+        # 进入 WAITING
+        manager.enqueue(HookEvent(
+            source="claude-code",
+            pane_id="test-pane",
+            event_type="Notification:permission_prompt",
+        ))
+        await manager.process_queued()
+        assert "test-pane" in manager._waiting_fallback
+
+        # 用户 focus 清除
+        manager.enqueue(HookEvent(
+            source="iterm",
+            pane_id="test-pane",
+            event_type="focus",
+        ))
+        await manager.process_queued()
+
+        assert "test-pane" not in manager._waiting_fallback
+
+    def test_waiting_fallback_marks_content_change(self, manager):
+        """WAITING 状态下内容变化标记 has_content"""
+        import asyncio
+
+        # 进入 WAITING
+        manager.enqueue(HookEvent(
+            source="claude-code",
+            pane_id="test-pane",
+            event_type="Notification:permission_prompt",
+        ))
+        asyncio.get_event_loop().run_until_complete(manager.process_queued())
+
+        # 确认初始状态
+        entered_at, state_id, has_content = manager._waiting_fallback["test-pane"]
+        assert has_content is False
+
+        # 内容变化会直接恢复，但如果状态机没有规则，会标记 has_content
+        # 这里我们验证恢复逻辑正常工作
+        manager.enqueue(HookEvent(
+            source="content",
+            pane_id="test-pane",
+            event_type="update",
+            data={"content": "output"},
+        ))
+        asyncio.get_event_loop().run_until_complete(manager.process_queued())
+
+        # 恢复后 fallback 被清除
+        assert "test-pane" not in manager._waiting_fallback
+
+
+class TestQueuePriority:
+    """队列优先级测试（Phase 1）"""
+
+    def test_low_priority_dropped_at_high_watermark(self, manager):
+        """低优先级事件在高水位时被丢弃"""
+        from termsupervisor.pane.queue import EventQueue
+        from termsupervisor.config import QUEUE_LOW_PRIORITY_DROP_WATERMARK
+
+        queue = EventQueue("test-pane", max_size=10)
+
+        # 填充到高水位以上（80% = 8个）
+        for i in range(9):
+            queue.enqueue_event(HookEvent(
+                source="shell",
+                pane_id="test-pane",
+                event_type="command_start",
+                data={"command": f"cmd{i}"},
+                pane_generation=1,
+            ))
+
+        # 低优先级事件应该被丢弃
+        result = queue.enqueue_event(HookEvent(
+            source="content",
+            pane_id="test-pane",
+            event_type="changed",
+            data={"content": "test"},
+            pane_generation=1,
+        ))
+
+        assert result is False
+        assert queue.low_priority_drops == 1
+
+    def test_protected_signal_never_dropped(self, manager):
+        """受保护信号永不丢弃"""
+        from termsupervisor.pane.queue import EventQueue
+
+        queue = EventQueue("test-pane", max_size=10)
+
+        # 填充到高水位以上
+        for i in range(9):
+            queue.enqueue_event(HookEvent(
+                source="shell",
+                pane_id="test-pane",
+                event_type="command_start",
+                data={"command": f"cmd{i}"},
+                pane_generation=1,
+            ))
+
+        # 受保护信号应该成功入队
+        result = queue.enqueue_event(HookEvent(
+            source="shell",
+            pane_id="test-pane",
+            event_type="command_end",
+            data={"exit_code": 0},
+            pane_generation=1,
+        ))
+
+        assert result is True
+
+    def test_low_priority_allowed_below_watermark(self, manager):
+        """低优先级事件在水位以下允许入队"""
+        from termsupervisor.pane.queue import EventQueue
+
+        queue = EventQueue("test-pane", max_size=10)
+
+        # 只填充少量（低于水位）
+        for i in range(5):
+            queue.enqueue_event(HookEvent(
+                source="shell",
+                pane_id="test-pane",
+                event_type="command_start",
+                data={"command": f"cmd{i}"},
+                pane_generation=1,
+            ))
+
+        # 低优先级事件应该成功入队
+        result = queue.enqueue_event(HookEvent(
+            source="content",
+            pane_id="test-pane",
+            event_type="changed",
+            data={"content": "test"},
+            pane_generation=1,
+        ))
+
+        assert result is True
+        assert queue.low_priority_drops == 0
+
+    def test_merge_content_events(self, manager):
+        """合并连续 content 事件"""
+        from termsupervisor.pane.queue import EventQueue
+
+        queue = EventQueue("test-pane", max_size=10)
+
+        # 入队多个 content 事件（中间夹杂其他事件）
+        queue.enqueue_event(HookEvent(
+            source="content",
+            pane_id="test-pane",
+            event_type="changed",
+            data={"content": "content1"},
+            pane_generation=1,
+        ))
+        queue.enqueue_event(HookEvent(
+            source="content",
+            pane_id="test-pane",
+            event_type="changed",
+            data={"content": "content2"},
+            pane_generation=1,
+        ))
+        queue.enqueue_event(HookEvent(
+            source="shell",
+            pane_id="test-pane",
+            event_type="command_start",
+            data={"command": "ls"},
+            pane_generation=1,
+        ))
+        queue.enqueue_event(HookEvent(
+            source="content",
+            pane_id="test-pane",
+            event_type="changed",
+            data={"content": "content3"},
+            pane_generation=1,
+        ))
+
+        assert len(queue) == 4
+
+        # 合并
+        merged = queue.merge_content_events()
+
+        # 应该合并了 content1（保留 content2 因为它在 command_start 之前）
+        assert merged == 1
+        assert len(queue) == 3
