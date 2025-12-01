@@ -715,6 +715,26 @@
             font-size: 13px;
         }
 
+        /* Copy toast */
+        .copy-toast {
+            position: fixed;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #238636;
+            color: #fff;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            z-index: 5000;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            pointer-events: none;
+        }
+        .copy-toast.show {
+            opacity: 1;
+        }
+
         /* Debug 按钮 */
         .debug-btn {
             background: #30363d;
@@ -1098,6 +1118,9 @@
     <div class="windows-container" id="windows"></div>
     <div class="status disconnected" id="status">Disconnected</div>
 
+    <!-- Copy toast -->
+    <div class="copy-toast" id="copyToast">Copied!</div>
+
     <!-- 右键菜单 -->
     <div class="context-menu" id="contextMenu">
         <div class="context-menu-item" id="menuRename">Rename</div>
@@ -1174,6 +1197,33 @@
                 return sessionId.split(':').pop();
             }
             return sessionId;
+        }
+
+        // Copy to clipboard and show toast
+        const copyToast = document.getElementById('copyToast');
+        let copyToastTimeout = null;
+
+        async function copyToClipboard(text, message = 'Copied!') {
+            try {
+                await navigator.clipboard.writeText(text);
+                showCopyToast(message);
+                return true;
+            } catch (e) {
+                console.error('Copy failed:', e);
+                showCopyToast('Copy failed!');
+                return false;
+            }
+        }
+
+        function showCopyToast(message) {
+            if (copyToastTimeout) {
+                clearTimeout(copyToastTimeout);
+            }
+            copyToast.textContent = message;
+            copyToast.classList.add('show');
+            copyToastTimeout = setTimeout(() => {
+                copyToast.classList.remove('show');
+            }, 1500);
         }
 
         // 通知面板系统
@@ -1902,6 +1952,11 @@
             paneEl.onclick = () => {
                 // 发送激活请求，后端会处理状态清除
                 ws.send(JSON.stringify({action: 'activate', session_id: paneData.session_id}));
+            };
+            paneEl.ondblclick = (e) => {
+                e.stopPropagation();
+                const sessionId = paneData.session_id;
+                copyToClipboard(sessionId, `Copied: ${sessionId.substring(0, 8)}...`);
             };
             paneEl.oncontextmenu = (e) => showContextMenu(e, 'session', paneData.session_id, paneData.name);
 
