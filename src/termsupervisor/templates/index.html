@@ -284,10 +284,26 @@
             background: rgba(48, 54, 61, 0.95);
             z-index: 10;
         }
-        /* 当前激活的 pane - 橙色边框 */
-        .pane.active {
-            border-color: #d29922 !important;
-            box-shadow: 0 0 8px rgba(210, 153, 34, 0.5);
+        /* 当前激活的 pane - 左下角 focus 角标 */
+        .pane-focus-badge {
+            position: absolute;
+            bottom: 4px;
+            left: 4px;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #3fb950;
+            box-shadow: 0 0 8px rgba(63, 185, 80, 0.6);
+            z-index: 21;
+            display: none;
+            animation: focusPulse 2s ease-in-out infinite;
+        }
+        .pane.active .pane-focus-badge {
+            display: block;
+        }
+        @keyframes focusPulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(0.9); }
         }
 
         /* === 状态指示器样式 === */
@@ -1850,7 +1866,12 @@
             paneEl.style.width = `calc(${width}% - ${padding * 2}px)`;
             paneEl.style.height = `calc(${height}% - ${padding * 2}px)`;
 
-            // 状态指示器
+            // Focus 角标（左上角）
+            const focusBadge = document.createElement('span');
+            focusBadge.className = 'pane-focus-badge';
+            paneEl.appendChild(focusBadge);
+
+            // 状态指示器（右上角）
             const statusEl = document.createElement('span');
             statusEl.className = 'pane-status';
             statusEl.dataset.statusIndicator = 'true';
