@@ -14,7 +14,11 @@ from datetime import datetime
 from typing import Callable, Any, TYPE_CHECKING
 
 from ..telemetry import get_logger, metrics
-from ..config import LONG_RUNNING_THRESHOLD_SECONDS
+from ..config import (
+    LONG_RUNNING_THRESHOLD_SECONDS,
+    WAITING_FALLBACK_TIMEOUT_SECONDS,
+    WAITING_FALLBACK_TO_RUNNING,
+)
 from ..iterm.utils import normalize_session_id
 from .types import TaskStatus, HookEvent, StateChange, DisplayState
 from .state_machine import PaneStateMachine
@@ -61,6 +65,9 @@ class StateManager:
 
         # pane generation 跟踪
         self._pane_generations: dict[str, int] = {}
+
+        # WAITING fallback 跟踪 {pane_id: (entered_at, state_id, has_content_change)}
+        self._waiting_fallback: dict[str, tuple[float, int, bool]] = {}
 
     # === 配置 ===
 
@@ -215,35 +222,60 @@ class StateManager:
 
         pane_short = pane_id[:8]
 
-        # content.changed 特殊处理
-        if event.signal == "content.changed":
+        # content.changed / content.update 特殊处理（兼容新旧名称）
+        if event.signal in ("content.changed", "content.update"):
             # 1. 先更新 Pane 内容
             content = event.data.get("content", "")
             content_hash = event.data.get("content_hash", "")
             pane.update_content(content, content_hash)
 
-            # 2. 如果是 WAITING_APPROVAL，尝试兜底恢复
+            # 2. 如果是 WAITING_APPROVAL，标记有内容变化并尝试兜底恢复
             if machine.status == TaskStatus.WAITING_APPROVAL:
+                # 标记有内容变化（用于 fallback 决策）
+                if pane_id in self._waiting_fallback:
+                    entered_at, state_id, _ = self._waiting_fallback[pane_id]
+                    self._waiting_fallback[pane_id] = (entered_at, state_id, True)
+
                 logger.debug(f"[StateManager:{pane_short}] Content fallback: WAITING → RUNNING")
+                metrics.inc("waiting.content_resume", {"pane": pane_short})
+
+                # 使用 content.update 信号处理
+                event.signal = "content.update"
                 change = machine.process(event)
                 if change:
-                    # 直接调用 Pane（不再依赖回调）
+                    # 清除 WAITING fallback 跟踪
+                    self._waiting_fallback.pop(pane_id, None)
                     pane.handle_state_change(change)
                 return change is not None
 
             return True
 
         # 其他事件转发给状态机
+        old_status = machine.status
         change = machine.process(event)
+
         if change:
-            # 直接调用 Pane（不再依赖回调）
+            # 跟踪 WAITING 状态进入
+            if change.new_status == TaskStatus.WAITING_APPROVAL:
+                self._waiting_fallback[pane_id] = (
+                    datetime.now().timestamp(),
+                    change.state_id,
+                    False,  # 尚无内容变化
+                )
+                logger.debug(f"[StateManager:{pane_short}] Entered WAITING, fallback scheduled")
+
+            # 如果离开 WAITING 状态，清除 fallback 跟踪
+            elif old_status == TaskStatus.WAITING_APPROVAL:
+                self._waiting_fallback.pop(pane_id, None)
+
             pane.handle_state_change(change)
+
         return change is not None
 
     # === LONG_RUNNING 检查 ===
 
     def tick_all(self) -> list[str]:
-        """检查所有 pane 的 LONG_RUNNING
+        """检查所有 pane 的 LONG_RUNNING 和 WAITING fallback
 
         由 Timer 周期调用。
 
@@ -273,6 +305,94 @@ class StateManager:
                     if pane:
                         pane.handle_state_change(change)
                     triggered.append(pane_id)
+
+        # 检查 WAITING fallback 超时
+        self._check_waiting_fallback()
+
+        return triggered
+
+    def _check_waiting_fallback(self) -> list[str]:
+        """检查 WAITING 状态超时 fallback
+
+        超时后通过状态机处理：
+        - 如果有内容变化 → RUNNING（timer.waiting_fallback_running）
+        - 如果无内容变化 → IDLE（timer.waiting_fallback_idle）
+
+        Returns:
+            触发了 fallback 的 pane_id 列表
+        """
+        now = datetime.now().timestamp()
+        triggered = []
+        to_remove = []
+
+        for pane_id, (entered_at, state_id, has_content) in self._waiting_fallback.items():
+            machine = self._machines.get(pane_id)
+            pane = self._panes.get(pane_id)
+
+            if not machine or not pane:
+                to_remove.append(pane_id)
+                continue
+
+            # 检查状态是否仍为 WAITING
+            if machine.status != TaskStatus.WAITING_APPROVAL:
+                to_remove.append(pane_id)
+                continue
+
+            # 检查是否超时
+            elapsed = now - entered_at
+            if elapsed < WAITING_FALLBACK_TIMEOUT_SECONDS:
+                continue
+
+            pane_short = pane_id[:8]
+
+            # 决定 fallback 目标状态和事件类型
+            if has_content and WAITING_FALLBACK_TO_RUNNING:
+                # 有内容变化，转 RUNNING
+                event_type = "waiting_fallback_running"
+                reason = "timeout_with_content"
+            else:
+                # 无内容变化或配置转 IDLE
+                event_type = "waiting_fallback_idle"
+                reason = "timeout_no_content"
+
+            # 构造 fallback 事件，通过状态机处理
+            event = HookEvent(
+                source="timer",
+                pane_id=pane_id,
+                event_type=event_type,
+                data={
+                    "reason": reason,
+                    "has_content_change": has_content,
+                    "elapsed": elapsed,
+                },
+                pane_generation=machine.pane_generation,
+            )
+
+            # 通过状态机处理（使用规则表）
+            change = machine.process(event)
+
+            if change:
+                # 更新 Pane
+                pane.handle_state_change(change)
+
+                logger.info(
+                    f"[StateManager:{pane_short}] WAITING fallback: → {change.new_status.value} "
+                    f"(reason={reason}, elapsed={elapsed:.1f}s)"
+                )
+                metrics.inc("waiting.fallback", {"pane": pane_short, "reason": reason})
+
+                triggered.append(pane_id)
+            else:
+                logger.warning(
+                    f"[StateManager:{pane_short}] WAITING fallback failed: "
+                    f"no transition for {event.signal}"
+                )
+
+            to_remove.append(pane_id)
+
+        # 清理已处理的 fallback
+        for pane_id in to_remove:
+            self._waiting_fallback.pop(pane_id, None)
 
         return triggered
 

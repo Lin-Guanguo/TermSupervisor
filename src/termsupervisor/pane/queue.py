@@ -13,7 +13,14 @@ from collections import deque
 from typing import Generic, TypeVar, Callable, Any, Coroutine
 
 from ..telemetry import get_logger, metrics
-from ..config import QUEUE_MAX_SIZE, QUEUE_HIGH_WATERMARK, METRICS_ENABLED
+from ..config import (
+    QUEUE_MAX_SIZE,
+    QUEUE_HIGH_WATERMARK,
+    QUEUE_LOW_PRIORITY_DROP_WATERMARK,
+    LOW_PRIORITY_SIGNALS,
+    PROTECTED_SIGNALS,
+    METRICS_ENABLED,
+)
 from .types import HookEvent
 
 logger = get_logger(__name__)
@@ -157,12 +164,20 @@ class EventQueue(ActorQueue[HookEvent]):
     """HookEvent 专用队列
 
     继承 ActorQueue，添加事件过滤功能。
+
+    队列策略：
+    - 低优先级事件（content.changed/content.update）在高水位时被丢弃
+    - 受保护事件（command_end, Stop）永不丢弃
+    - 超出容量时丢弃最旧的非保护事件
     """
 
     def __init__(self, pane_id: str, max_size: int = QUEUE_MAX_SIZE):
         super().__init__(pane_id, max_size)
         self._current_generation: int = 1
         self._current_state_id: int = 0
+        # 丢弃计数器
+        self._low_priority_drops: int = 0
+        self._overflow_drops: int = 0
 
     def set_current_generation(self, generation: int) -> None:
         """设置当前 generation"""
@@ -172,14 +187,24 @@ class EventQueue(ActorQueue[HookEvent]):
         """设置当前 state_id"""
         self._current_state_id = state_id
 
+    @property
+    def low_priority_drops(self) -> int:
+        """低优先级丢弃计数"""
+        return self._low_priority_drops
+
+    @property
+    def overflow_drops(self) -> int:
+        """溢出丢弃计数"""
+        return self._overflow_drops
+
     def enqueue_event(self, event: HookEvent) -> bool:
-        """入队事件（带过期检查）
+        """入队事件（带过期检查 + 优先级策略）
 
         Args:
             event: Hook 事件
 
         Returns:
-            是否入队成功（过期事件返回 False）
+            是否入队成功（过期或被丢弃的事件返回 False）
         """
         pane_short = self.pane_id[:8]
 
@@ -193,4 +218,144 @@ class EventQueue(ActorQueue[HookEvent]):
                 metrics.inc("queue.stale_dropped", {"pane": pane_short})
             return False
 
-        return self.enqueue(event)
+        # 优先级策略：低优先级事件在高水位时被丢弃
+        if self._should_drop_low_priority(event):
+            logger.debug(
+                f"[Queue:{pane_short}] Dropped low-priority event: {event.signal} "
+                f"(depth={len(self._queue)}/{self._max_size})"
+            )
+            self._low_priority_drops += 1
+            if METRICS_ENABLED:
+                metrics.inc("queue.low_priority_dropped", {"pane": pane_short})
+            return False
+
+        # 队列满时，使用保护策略丢弃
+        if len(self._queue) >= self._max_size:
+            dropped = self._drop_for_overflow()
+            if dropped is None:
+                # 无法丢弃任何事件（全是保护事件），拒绝新事件
+                logger.warning(
+                    f"[Queue:{pane_short}] Queue full with protected events, "
+                    f"rejecting new event: {event.signal}"
+                )
+                if METRICS_ENABLED:
+                    metrics.inc("queue.overflow_rejected", {"pane": pane_short})
+                return False
+
+        # 直接添加到队列（绕过 ActorQueue.enqueue 的无保护丢弃）
+        self._queue.append(event)
+
+        # 更新 depth 指标
+        depth = len(self._queue)
+        if METRICS_ENABLED:
+            metrics.gauge("queue.depth", depth, {"pane": pane_short})
+
+        # 高水位告警
+        if depth >= self._max_size * self._high_watermark:
+            logger.debug(
+                f"[Queue:{pane_short}] High watermark: {depth}/{self._max_size} "
+                f"({depth / self._max_size * 100:.0f}%)"
+            )
+
+        return True
+
+    def _drop_for_overflow(self) -> HookEvent | None:
+        """溢出时丢弃事件（优先丢弃非保护事件）
+
+        策略：
+        1. 优先丢弃最旧的低优先级事件
+        2. 其次丢弃最旧的普通事件
+        3. 永不丢弃保护事件
+
+        Returns:
+            被丢弃的事件，如果全是保护事件则返回 None
+        """
+        pane_short = self.pane_id[:8]
+
+        # 第一轮：找最旧的低优先级事件
+        for i, evt in enumerate(self._queue):
+            if evt.signal in LOW_PRIORITY_SIGNALS:
+                dropped = self._queue[i]
+                del self._queue[i]
+                self._overflow_drops += 1
+                logger.debug(
+                    f"[Queue:{pane_short}] Overflow: dropped low-priority {dropped.signal}"
+                )
+                if METRICS_ENABLED:
+                    metrics.inc("queue.overflow_low_priority", {"pane": pane_short})
+                return dropped
+
+        # 第二轮：找最旧的非保护事件
+        for i, evt in enumerate(self._queue):
+            if evt.signal not in PROTECTED_SIGNALS:
+                dropped = self._queue[i]
+                del self._queue[i]
+                self._overflow_drops += 1
+                logger.debug(
+                    f"[Queue:{pane_short}] Overflow: dropped normal {dropped.signal}"
+                )
+                if METRICS_ENABLED:
+                    metrics.inc("queue.overflow_normal", {"pane": pane_short})
+                return dropped
+
+        # 全是保护事件，无法丢弃
+        return None
+
+    def _should_drop_low_priority(self, event: HookEvent) -> bool:
+        """判断是否应丢弃低优先级事件
+
+        策略：
+        - 受保护信号永不丢弃
+        - 低优先级信号在超过水位时丢弃
+        """
+        # 受保护信号永不丢弃
+        if event.signal in PROTECTED_SIGNALS:
+            return False
+
+        # 低优先级信号在高水位时丢弃
+        if event.signal in LOW_PRIORITY_SIGNALS:
+            watermark = self._max_size * QUEUE_LOW_PRIORITY_DROP_WATERMARK
+            return len(self._queue) >= watermark
+
+        return False
+
+    def merge_content_events(self) -> int:
+        """合并队列中的连续 content 事件（可选优化）
+
+        保留最新的 content.changed/update 事件，丢弃旧的。
+
+        Returns:
+            合并的事件数
+        """
+        if len(self._queue) < 2:
+            return 0
+
+        merged = 0
+        new_queue: deque[HookEvent] = deque(maxlen=self._max_size)
+        last_content_event: HookEvent | None = None
+
+        for event in self._queue:
+            if event.signal in LOW_PRIORITY_SIGNALS:
+                # 只保留最新的 content 事件
+                if last_content_event is not None:
+                    merged += 1
+                last_content_event = event
+            else:
+                # 非 content 事件：先入队之前的 content，再入队当前
+                if last_content_event is not None:
+                    new_queue.append(last_content_event)
+                    last_content_event = None
+                new_queue.append(event)
+
+        # 入队最后一个 content 事件
+        if last_content_event is not None:
+            new_queue.append(last_content_event)
+
+        self._queue = new_queue
+
+        if merged > 0 and METRICS_ENABLED:
+            pane_short = self.pane_id[:8]
+            metrics.inc("queue.content_merged", {"pane": pane_short}, merged)
+            logger.debug(f"[Queue:{pane_short}] Merged {merged} content events")
+
+        return merged

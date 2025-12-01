@@ -14,7 +14,13 @@ from datetime import datetime
 from typing import Callable, Any, TYPE_CHECKING
 
 from ..telemetry import get_logger, metrics
-from ..config import DISPLAY_DELAY_SECONDS, NOTIFICATION_MIN_DURATION_SECONDS
+from ..config import (
+    DISPLAY_DELAY_SECONDS,
+    NOTIFICATION_MIN_DURATION_SECONDS,
+    AUTO_DISMISS_DWELL_SECONDS,
+    RECENTLY_FINISHED_HINT_SECONDS,
+    QUIET_COMPLETION_THRESHOLD_SECONDS,
+)
 from .types import TaskStatus, StateChange, DisplayState
 
 if TYPE_CHECKING:
@@ -72,6 +78,8 @@ class Pane:
 
         # 延迟任务名
         self._delay_task_name = f"pane_display_delay_{pane_id[:8]}"
+        self._auto_dismiss_task_name = f"pane_auto_dismiss_{pane_id[:8]}"
+        self._recently_finished_task_name = f"pane_recently_finished_{pane_id[:8]}"
 
     # === 属性 ===
 
@@ -142,8 +150,10 @@ class Pane:
         old_status = self._display_state.status
         new_status = change.new_status
 
-        # 2. 取消旧的延迟任务（如果有）
+        # 2. 取消旧的定时任务（延迟展示 + auto-dismiss + recently_finished）
         self._cancel_delay_task()
+        self._cancel_auto_dismiss_task()
+        self._cancel_recently_finished_task()
 
         # 3. 检查是否需要延迟展示
         # DONE/FAILED → IDLE 时，延迟展示（状态机已转换，但显示层保持原状态 5s）
@@ -170,6 +180,13 @@ class Pane:
         pane_short = self.pane_id[:8]
 
         old_state = self._display_state
+
+        # 计算 quiet_completion（短任务不闪烁）
+        quiet_completion = False
+        if change.new_status in {TaskStatus.DONE, TaskStatus.FAILED}:
+            if change.running_duration < QUIET_COMPLETION_THRESHOLD_SECONDS:
+                quiet_completion = True
+
         self._display_state = DisplayState(
             status=change.new_status,
             source=change.new_source,
@@ -178,12 +195,19 @@ class Pane:
             started_at=change.started_at,
             running_duration=change.running_duration,
             content_hash=self._content_hash,
+            recently_finished=False,
+            quiet_completion=quiet_completion,
         )
 
         logger.info(
             f"[Pane:{pane_short}] Display: {old_state.status.value} → "
             f"{change.new_status.value} | state_id={change.state_id}"
         )
+
+        # 注册 auto-dismiss 定时器（DONE/FAILED 自动消失）
+        self._cancel_auto_dismiss_task()
+        if change.new_status in {TaskStatus.DONE, TaskStatus.FAILED}:
+            self._register_auto_dismiss(change.state_id)
 
         # 触发回调
         if self._on_display_change:
@@ -228,6 +252,94 @@ class Pane:
         """取消延迟任务"""
         if self._timer and self._timer.has_delay(self._delay_task_name):
             self._timer.cancel_delay(self._delay_task_name)
+
+    # === Auto-dismiss（DONE/FAILED 自动消失）===
+
+    def _register_auto_dismiss(self, state_id: int) -> None:
+        """注册 auto-dismiss 定时器
+
+        DONE/FAILED 状态在 dwell 时间后自动消失，即使 focused。
+        """
+        if not self._timer:
+            return
+
+        pane_short = self.pane_id[:8]
+
+        def auto_dismiss():
+            # 检查 state_id 是否仍然匹配
+            if self._display_state.state_id != state_id:
+                logger.debug(
+                    f"[Pane:{pane_short}] Auto-dismiss skipped: "
+                    f"state_id changed ({self._display_state.state_id} != {state_id})"
+                )
+                return
+
+            # 检查状态是否仍为 DONE/FAILED
+            if self._display_state.status not in {TaskStatus.DONE, TaskStatus.FAILED}:
+                return
+
+            old_status = self._display_state.status
+
+            # 设置 recently_finished 提示
+            self._display_state.recently_finished = True
+            self._display_state.status = TaskStatus.IDLE
+
+            logger.info(
+                f"[Pane:{pane_short}] Auto-dismiss: {old_status.value} → IDLE "
+                f"(dwell={AUTO_DISMISS_DWELL_SECONDS}s)"
+            )
+            metrics.inc("pane.auto_dismiss", {"pane": pane_short})
+
+            # 触发回调
+            if self._on_display_change:
+                self._on_display_change(self._display_state)
+
+            # 注册 recently_finished 提示清除
+            self._register_recently_finished_clear()
+
+        self._timer.register_delay(
+            self._auto_dismiss_task_name,
+            AUTO_DISMISS_DWELL_SECONDS,
+            auto_dismiss,
+        )
+        logger.debug(f"[Pane:{pane_short}] Auto-dismiss scheduled in {AUTO_DISMISS_DWELL_SECONDS}s")
+
+    def _cancel_auto_dismiss_task(self) -> None:
+        """取消 auto-dismiss 任务"""
+        if self._timer and self._timer.has_delay(self._auto_dismiss_task_name):
+            self._timer.cancel_delay(self._auto_dismiss_task_name)
+
+    def _register_recently_finished_clear(self) -> None:
+        """注册 recently_finished 提示清除定时器"""
+        if not self._timer:
+            return
+
+        pane_short = self.pane_id[:8]
+        current_state_id = self._display_state.state_id
+
+        def clear_hint():
+            # 只在 state_id 未变化时清除
+            if self._display_state.state_id != current_state_id:
+                return
+            if not self._display_state.recently_finished:
+                return
+
+            self._display_state.recently_finished = False
+            logger.debug(f"[Pane:{pane_short}] Cleared recently_finished hint")
+
+            if self._on_display_change:
+                self._on_display_change(self._display_state)
+
+        self._timer.register_delay(
+            self._recently_finished_task_name,
+            RECENTLY_FINISHED_HINT_SECONDS,
+            clear_hint,
+        )
+
+    def _cancel_recently_finished_task(self) -> None:
+        """取消 recently_finished 提示清除任务"""
+        if self._timer and self._timer.has_delay(self._recently_finished_task_name):
+            self._timer.cancel_delay(self._recently_finished_task_name)
 
     # === 通知抑制 ===
 
@@ -279,9 +391,20 @@ class Pane:
 
     def to_dict(self) -> dict:
         """序列化为字典"""
+        # 序列化 display_state 的原始字段（不包含计算字段）
+        ds = self._display_state
         return {
             "pane_id": self.pane_id,
-            "display_state": self._display_state.to_dict(),
+            "display_state": {
+                "status": ds.status.value,
+                "source": ds.source,
+                "description": ds.description,
+                "state_id": ds.state_id,
+                "started_at": ds.started_at,
+                "running_duration": ds.running_duration,
+                "recently_finished": ds.recently_finished,
+                "quiet_completion": ds.quiet_completion,
+            },
             "content_hash": self._content_hash,
             # 不持久化 content（太大）
         }
@@ -310,6 +433,8 @@ class Pane:
             started_at=ds.get("started_at"),
             running_duration=ds.get("running_duration", 0.0),
             content_hash=data.get("content_hash", ""),
+            recently_finished=ds.get("recently_finished", False),
+            quiet_completion=ds.get("quiet_completion", False),
         )
         pane._content_hash = data.get("content_hash", "")
 

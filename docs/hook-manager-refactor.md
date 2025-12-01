@@ -1,3 +1,5 @@
+Last Updated: 2025-12-01
+
 # HookManager event handling refactor plan
 
 Context: `HookManager` currently owns source-specific helpers (e.g., `process_shell_command_start`) and logging. We want Manager to stay generic (normalize + enqueue) and move per-source translation/sanitization into sources.

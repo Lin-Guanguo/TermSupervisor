@@ -139,3 +139,28 @@ def always_false() -> Predicate:
         return False
 
     return predicate
+
+
+def reject_same_source_in_long_running() -> Predicate:
+    """拒绝 LONG_RUNNING 状态下同源事件的谓词
+
+    用于实现 sticky LONG_RUNNING：在 LONG_RUNNING 时，同源的 RUNNING 信号被忽略，
+    除非 generation 增加（新会话开始）。
+
+    Returns:
+        谓词函数
+    """
+    def predicate(event: HookEvent, snapshot: StateSnapshot) -> bool:
+        # 如果不是 LONG_RUNNING，允许
+        if snapshot.status != TaskStatus.LONG_RUNNING:
+            return True
+        # 如果是跨源，允许
+        if event.source != snapshot.source:
+            return True
+        # 如果 generation 增加（新会话），允许
+        if event.pane_generation > snapshot.pane_generation:
+            return True
+        # 同源 + LONG_RUNNING + 同 generation：拒绝
+        return False
+
+    return predicate

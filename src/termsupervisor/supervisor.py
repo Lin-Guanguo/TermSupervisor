@@ -185,6 +185,11 @@ class TermSupervisor:
                     # 获取或创建变化队列
                     queue = self._get_or_create_queue(pane.session_id)
 
+                    # 同步 WAITING 状态到队列（影响刷新阈值）
+                    hook_manager = self._get_hook_manager()
+                    pane_status = hook_manager.get_status(pane.session_id)
+                    queue.set_waiting(pane_status == TaskStatus.WAITING_APPROVAL)
+
                     # 使用队列判断是否需要刷新
                     should_refresh = queue.check_and_record(content)
 
@@ -216,7 +221,7 @@ class TermSupervisor:
                             await hook_manager.emit_event(
                                 source="content",
                                 pane_id=pane.session_id,
-                                event_type="changed",
+                                event_type="update",  # Phase 2: renamed from "changed"
                                 data={"content": content, "content_hash": content_hash},
                                 log=False,  # 内容事件太频繁，禁用日志
                             )

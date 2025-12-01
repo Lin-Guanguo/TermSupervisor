@@ -134,34 +134,44 @@ class TestUserEvents:
 class TestContentEvents:
     """内容事件测试"""
 
-    async def test_content_changed_updates_pane(self, manager):
-        """content.changed 更新 Pane 内容"""
-        await manager.process_content_changed(
+    async def test_content_update_updates_pane(self, manager):
+        """content.update 更新 Pane 内容"""
+        await manager.process_content_update(
             "test-pane",
             content="new content",
             content_hash="hash123",
         )
 
         state = manager.get_state("test-pane")
-        # 注意：content_changed 本身不改变状态，只更新内容
+        # 注意：content_update 本身不改变状态，只更新内容
         # 状态应该是 IDLE
         assert manager.get_status("test-pane") == TaskStatus.IDLE
 
-    async def test_content_changed_waiting_to_running(self, manager):
-        """content.changed 在 WAITING 时触发兜底恢复"""
+    async def test_content_update_waiting_to_running(self, manager):
+        """content.update 在 WAITING 时触发兜底恢复"""
         # 先进入 WAITING 状态
         await manager.process_claude_code_event(
             "test-pane", "Notification:permission_prompt"
         )
         assert manager.get_status("test-pane") == TaskStatus.WAITING_APPROVAL
 
-        # content.changed 应该触发兜底恢复
-        await manager.process_content_changed(
+        # content.update 应该触发兜底恢复
+        await manager.process_content_update(
             "test-pane",
             content="output",
             content_hash="hash456",
         )
         assert manager.get_status("test-pane") == TaskStatus.RUNNING
+
+    async def test_content_changed_compat(self, manager):
+        """content.changed 兼容方法仍可用"""
+        # 旧的 process_content_changed 方法应该仍然有效
+        await manager.process_content_changed(
+            "test-pane",
+            content="compat test",
+            content_hash="compat123",
+        )
+        assert manager.get_status("test-pane") == TaskStatus.IDLE
 
 
 class TestCallback:
@@ -359,7 +369,7 @@ class TestEmitEvent:
         await manager.process_claude_code_event("pane-2", "SessionStart")
         await manager.process_user_focus("pane-3")
         await manager.process_user_click("pane-4")
-        await manager.process_content_changed("pane-5", "content", "hash")
+        await manager.process_content_update("pane-5", "content", "hash")  # renamed from changed
 
         # 检查指标被记录
         shell_start = metrics.get_counter(
@@ -384,7 +394,7 @@ class TestEmitEvent:
         )
         content = metrics.get_counter(
             "hooks.events_total",
-            labels={"source": "content", "event_type": "changed"},
+            labels={"source": "content", "event_type": "update"},  # renamed from changed
         )
 
         assert shell_start >= 1

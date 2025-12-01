@@ -26,6 +26,7 @@ from .predicates import (
     require_exit_code_nonzero,
     require_source_match,
     require_running_duration_gt,
+    reject_same_source_in_long_running,
 )
 
 # RUNNING 和 LONG_RUNNING 的组合
@@ -42,6 +43,7 @@ S1_SHELL_COMMAND_START = TransitionRule(
     to_source="shell",
     description_template="执行: {command:30}",
     reset_started_at=True,
+    predicates=[reject_same_source_in_long_running()],  # sticky LONG_RUNNING
 )
 
 S2_SHELL_COMMAND_END_SUCCESS = TransitionRule(
@@ -77,6 +79,7 @@ C1_CLAUDE_SESSION_START = TransitionRule(
     to_source="claude-code",
     description_template="会话开始",
     reset_started_at=True,
+    predicates=[reject_same_source_in_long_running()],  # sticky LONG_RUNNING
 )
 
 C2_CLAUDE_PRE_TOOL_USE = TransitionRule(
@@ -87,6 +90,7 @@ C2_CLAUDE_PRE_TOOL_USE = TransitionRule(
     to_source="claude-code",
     description_template="工具: {tool_name:30}",
     reset_started_at=True,  # 默认重置，但同源时不重置（在 state_machine 中处理）
+    predicates=[reject_same_source_in_long_running()],  # sticky LONG_RUNNING
 )
 
 C3_CLAUDE_STOP = TransitionRule(
@@ -142,6 +146,27 @@ T1_TIMER_CHECK_LONG_RUNNING = TransitionRule(
     reset_started_at=False,
 )
 
+# WAITING fallback 规则（超时恢复）
+T2_WAITING_FALLBACK_TO_RUNNING = TransitionRule(
+    from_status={TaskStatus.WAITING_APPROVAL},
+    from_source=None,  # 任意来源
+    signal_pattern="timer.waiting_fallback_running",
+    to_status=TaskStatus.RUNNING,
+    to_source="=",  # 保持原 source（不改为 timer）
+    description_template="超时恢复（有内容变化）",
+    reset_started_at=False,  # 保留 started_at
+)
+
+T3_WAITING_FALLBACK_TO_IDLE = TransitionRule(
+    from_status={TaskStatus.WAITING_APPROVAL},
+    from_source=None,  # 任意来源
+    signal_pattern="timer.waiting_fallback_idle",
+    to_status=TaskStatus.IDLE,
+    to_source="=",  # 保持原 source
+    description_template="超时恢复（无内容变化）",
+    reset_started_at=True,
+)
+
 
 # === User 规则（iterm/frontend）===
 
@@ -188,6 +213,18 @@ U2_USER_CLEAR_DONE_FAILED_CLICK = TransitionRule(
 
 # === Content 规则 ===
 
+# 支持新名称 content.update
+R1_CONTENT_UPDATE_WAITING_TO_RUNNING = TransitionRule(
+    from_status={TaskStatus.WAITING_APPROVAL},
+    from_source=None,  # 任意来源
+    signal_pattern="content.update",
+    to_status=TaskStatus.RUNNING,
+    to_source="=",  # 保持原 source
+    description_template="内容变化，恢复执行",
+    reset_started_at=False,
+)
+
+# 兼容旧名称 content.changed（临时别名）
 R1_CONTENT_CHANGED_WAITING_TO_RUNNING = TransitionRule(
     from_status={TaskStatus.WAITING_APPROVAL},
     from_source=None,  # 任意来源
@@ -218,6 +255,8 @@ TRANSITION_RULES: list[TransitionRule] = [
 
     # Timer 规则
     T1_TIMER_CHECK_LONG_RUNNING,
+    T2_WAITING_FALLBACK_TO_RUNNING,
+    T3_WAITING_FALLBACK_TO_IDLE,
 
     # User 规则
     U1_USER_CLEAR_WAITING,
@@ -225,8 +264,9 @@ TRANSITION_RULES: list[TransitionRule] = [
     U2_USER_CLEAR_DONE_FAILED,
     U2_USER_CLEAR_DONE_FAILED_CLICK,
 
-    # Content 规则
-    R1_CONTENT_CHANGED_WAITING_TO_RUNNING,
+    # Content 规则（新名称优先）
+    R1_CONTENT_UPDATE_WAITING_TO_RUNNING,
+    R1_CONTENT_CHANGED_WAITING_TO_RUNNING,  # 兼容旧名称
 ]
 
 

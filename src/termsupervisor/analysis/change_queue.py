@@ -68,6 +68,7 @@ class PaneChangeQueue:
     - 每秒更新 queue[-1]
     - 页面刷新: 当前 vs last_render_content (阈值 5行 或 10s超时)
     - 队列新增: queue[-1] vs queue[-2] (阈值 20行)
+    - WAITING 状态下刷新阈值更低（1行）
 
     两个独立判断，两个不同的对比基准
     """
@@ -85,8 +86,16 @@ class PaneChangeQueue:
         # 配置
         self._max_size = config.QUEUE_MAX_SIZE
         self._refresh_lines = config.QUEUE_REFRESH_LINES
+        self._waiting_refresh_lines = config.WAITING_REFRESH_LINES
         self._new_record_lines = config.QUEUE_NEW_RECORD_LINES
         self._flush_timeout = config.QUEUE_FLUSH_TIMEOUT
+
+        # 状态感知
+        self._is_waiting = False  # 外部设置，用于降低刷新阈值
+
+    def set_waiting(self, is_waiting: bool) -> None:
+        """设置 WAITING 状态（影响刷新阈值）"""
+        self._is_waiting = is_waiting
 
     def check_and_record(self, content: str) -> bool:
         """检查变化并记录
@@ -164,7 +173,7 @@ class PaneChangeQueue:
 
         对比: 当前内容 vs last_render_content
         条件 (OR):
-        - 变化 >= 5行 (中等变化)
+        - 变化 >= threshold (WAITING 时 1行，否则 5行)
         - 有变化 且 距上次刷新 >= 10s (兜底)
         """
         from termsupervisor.analysis.content_cleaner import ContentCleaner
@@ -176,8 +185,11 @@ class PaneChangeQueue:
         if changed_lines == 0:
             return False
 
-        # 中等变化
-        if changed_lines >= self._refresh_lines:
+        # 根据状态选择阈值
+        threshold = self._waiting_refresh_lines if self._is_waiting else self._refresh_lines
+
+        # 中等变化（WAITING 时更敏感）
+        if changed_lines >= threshold:
             return True
 
         # 兜底: 有变化且超时
