@@ -15,6 +15,8 @@ from termsupervisor.pane import TaskStatus
 
 if TYPE_CHECKING:
     from termsupervisor.hooks.manager import HookManager
+    from termsupervisor.analysis.content_heuristic import ContentHeuristicAnalyzer
+    from termsupervisor.hooks.sources.shell import ShellHookSource
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +51,8 @@ class TermSupervisor:
         # 依赖注入
         self._hook_manager = hook_manager
         self._iterm_client = iterm_client
+        self._heuristic_analyzer: "ContentHeuristicAnalyzer | None" = None
+        self._shell_source: "ShellHookSource | None" = None
 
         # 变化队列 (用于智能节流)
         self.pane_queues: dict[str, PaneChangeQueue] = {}
@@ -60,6 +64,14 @@ class TermSupervisor:
     def set_iterm_client(self, client: ITerm2Client) -> None:
         """设置 ITerm2Client"""
         self._iterm_client = client
+
+    def set_heuristic_analyzer(self, analyzer: "ContentHeuristicAnalyzer") -> None:
+        """设置 ContentHeuristicAnalyzer（用于内容启发式分析）"""
+        self._heuristic_analyzer = analyzer
+
+    def set_shell_source(self, shell_source: "ShellHookSource") -> None:
+        """设置 ShellHookSource（用于获取 PromptMonitor 状态）"""
+        self._shell_source = shell_source
 
     def _get_hook_manager(self) -> "HookManager":
         """获取 HookManager"""
@@ -181,6 +193,8 @@ class TermSupervisor:
                         continue
 
                     content = await client.get_session_content(session)
+                    # Fetch job metadata (jobName, jobPid, commandLine, tty)
+                    job_metadata = await client.get_session_job_metadata(session)
 
                     # 获取或创建变化队列
                     queue = self._get_or_create_queue(pane.session_id)
@@ -192,6 +206,16 @@ class TermSupervisor:
 
                     # 使用队列判断是否需要刷新
                     should_refresh = queue.check_and_record(content)
+
+                    # Always track history for heuristic analysis
+                    history = self._get_or_create_history(pane.session_id, pane.name)
+                    # Refresh pane_name every poll (user may rename pane/tab)
+                    history.pane_name = pane.name
+                    # Update job metadata for whitelist matching
+                    history.job_name = job_metadata.job_name
+                    history.job_pid = job_metadata.job_pid
+                    history.command_line = job_metadata.redacted_command_line()
+                    panes_to_analyze.append(history)
 
                     if pane.session_id in self.snapshots:
                         if should_refresh:
@@ -210,10 +234,8 @@ class TermSupervisor:
                             )
 
                             # 记录变化到 PaneHistory (兼容旧逻辑)
-                            history = self._get_or_create_history(pane.session_id, pane.name)
                             pane_change = self._create_pane_change(content, changed_lines)
                             history.add_change(pane_change)
-                            panes_to_analyze.append(history)
 
                             # 通知 HookManager 内容变化（触发 WAITING_APPROVAL 兜底恢复）
                             hook_manager = self._get_hook_manager()
@@ -234,12 +256,10 @@ class TermSupervisor:
                             content=content,
                             updated_at=now,
                         )
-                        # 新 pane 也创建历史记录
-                        self._get_or_create_history(pane.session_id, pane.name)
                         # 新 pane 直接加入刷新列表
                         updated_sessions.append(pane.session_id)
 
-        # 执行状态分析
+        # 执行状态分析 (runs for ALL panes on every poll)
         await self._analyze_panes(panes_to_analyze)
 
         # 检查已关闭的 session
@@ -251,11 +271,41 @@ class TermSupervisor:
     async def _analyze_panes(self, panes: list[PaneHistory]):
         """分析需要分析的 pane 状态
 
-        注意：状态分析已由 HookManager 接管，此方法为空实现。
-        保留方法签名以保持接口稳定。
+        Runs content heuristic analysis for whitelisted panes.
+        Passes both job_name (preferred) and pane_title (fallback) for gating.
         """
-        # 状态分析现在由 HookManager 处理，不再需要本地分析
-        pass
+        if not self._heuristic_analyzer or not self._shell_source:
+            return
+
+        hook_manager = self._get_hook_manager()
+
+        for history in panes:
+            pane_id = history.session_id
+
+            # Get queue for this pane
+            queue = self.pane_queues.get(pane_id)
+            if not queue:
+                continue
+
+            # Get current state from HookManager
+            state = hook_manager.get_state(pane_id)
+            if not state:
+                continue
+
+            # Get PromptMonitor status from ShellHookSource
+            prompt_status = self._shell_source.get_prompt_monitor_status(pane_id)
+
+            # Run heuristic analysis with both job_name and pane_title
+            await self._heuristic_analyzer.process_and_emit(
+                pane_id=pane_id,
+                pane_title=history.pane_name,
+                current_status=state.status,
+                current_source=state.source,
+                prompt_status=prompt_status,
+                queue=queue,
+                job_name=history.job_name,
+                command_line=history.command_line,
+            )
 
     def _log_update(self, now: datetime, pane, changed_lines: list[str]):
         """记录更新日志"""

@@ -21,6 +21,9 @@ class PaneChange:
     diff_summary: str  # 变化摘要（截取关键行）
     last_n_lines: list[str]  # 屏幕最后 N 行
     changed_line_count: int  # 变化行数
+    # Content heuristic fields (Phase 2)
+    newline_count: int = 0  # Number of newlines in cleaned tail
+    burst_length: int = 0   # Char count increase since last record
 
 
 @dataclass
@@ -38,6 +41,11 @@ class PaneHistory:
     # 思考状态跟踪
     is_thinking: bool = False
     thinking_since: datetime | None = None
+
+    # Heuristic job metadata (for whitelist matching)
+    job_name: str = ""
+    job_pid: int | None = None
+    command_line: str = ""  # Redacted for logging
 
     def add_change(self, change: PaneChange) -> None:
         """添加变化记录"""
@@ -59,6 +67,10 @@ class ChangeRecord:
     content_snapshot: str         # 内容快照（清洗后）
     diff_summary: str             # 变化摘要（与 [-2] 的差异）
     changed_lines: int            # 与 [-2] 的变化行数
+    # Content heuristic fields (Phase 2)
+    newline_count: int = 0        # Line count in cleaned content
+    char_count: int = 0           # Char count in cleaned content (for burst calc)
+    raw_tail: str = ""            # Raw (uncleaned) last N lines for heuristic pattern matching
 
 
 class PaneChangeQueue:
@@ -93,6 +105,10 @@ class PaneChangeQueue:
         # 状态感知
         self._is_waiting = False  # 外部设置，用于降低刷新阈值
 
+        # Heuristic quiet tracking (independent of record push)
+        self._last_change_at: datetime | None = None  # When content hash last changed
+        self._last_hash: str = ""  # Previous hash for change detection
+
     def set_waiting(self, is_waiting: bool) -> None:
         """设置 WAITING 状态（影响刷新阈值）"""
         self._is_waiting = is_waiting
@@ -113,18 +129,22 @@ class PaneChangeQueue:
             是否应触发 SVG 刷新
         """
         from termsupervisor.analysis.content_cleaner import ContentCleaner
+        from termsupervisor import config
 
         now = datetime.now()
         cleaned_content = ContentCleaner.clean_content_str(content)
         content_hash = ContentCleaner.content_hash(content)
+        # Store raw tail for heuristic pattern matching
+        raw_lines = content.split('\n')
+        raw_tail = '\n'.join(raw_lines[-config.SCREEN_LAST_N_LINES:])
 
         # === 队列为空: 初始化 ===
         if len(self._records) == 0:
-            self._init_queue(now, content_hash, cleaned_content)
+            self._init_queue(now, content_hash, cleaned_content, raw_tail)
             return True
 
         # === Step 1: 更新 queue[-1] ===
-        self._update_tail(now, content_hash, cleaned_content)
+        self._update_tail(now, content_hash, cleaned_content, raw_tail)
 
         # === Step 2: 判断是否刷新页面 ===
         should_refresh = self._check_should_refresh(cleaned_content, now)
@@ -138,8 +158,10 @@ class PaneChangeQueue:
 
         return should_refresh
 
-    def _init_queue(self, now: datetime, content_hash: str, cleaned_content: str):
+    def _init_queue(self, now: datetime, content_hash: str, cleaned_content: str, raw_tail: str):
         """初始化: push 两条相同记录"""
+        newline_count = cleaned_content.count('\n') + 1 if cleaned_content else 0
+        char_count = len(cleaned_content)
         record = ChangeRecord(
             timestamp=now,
             updated_at=now,
@@ -147,6 +169,9 @@ class PaneChangeQueue:
             content_snapshot=cleaned_content,
             diff_summary="(initial)",
             changed_lines=0,
+            newline_count=newline_count,
+            char_count=char_count,
+            raw_tail=raw_tail,
         )
         # 添加两条相同记录
         self._records.append(record)
@@ -157,16 +182,31 @@ class PaneChangeQueue:
             content_snapshot=cleaned_content,
             diff_summary="(initial)",
             changed_lines=0,
+            newline_count=newline_count,
+            char_count=char_count,
+            raw_tail=raw_tail,
         ))
         self._last_render_content = cleaned_content
         self._last_render_time = now
+        # Initialize heuristic tracking
+        self._last_change_at = now
+        self._last_hash = content_hash
 
-    def _update_tail(self, now: datetime, content_hash: str, cleaned_content: str):
+    def _update_tail(self, now: datetime, content_hash: str, cleaned_content: str, raw_tail: str):
         """更新队尾 (每秒都执行)"""
         tail = self._records[-1]
         tail.updated_at = now
         tail.content_hash = content_hash
         tail.content_snapshot = cleaned_content
+        # Update heuristic metrics
+        tail.newline_count = cleaned_content.count('\n') + 1 if cleaned_content else 0
+        tail.char_count = len(cleaned_content)
+        tail.raw_tail = raw_tail
+
+        # Track content changes for heuristic quiet detection
+        if content_hash != self._last_hash:
+            self._last_change_at = now
+            self._last_hash = content_hash
 
     def _check_should_refresh(self, cleaned_content: str, now: datetime) -> bool:
         """判断是否刷新页面
@@ -221,6 +261,8 @@ class PaneChangeQueue:
         if changed_lines >= self._new_record_lines:
             # push 新记录，当前 tail 变成 base
             diff_summary = self._make_summary(diff_details)
+            newline_count = cleaned_content.count('\n') + 1 if cleaned_content else 0
+            char_count = len(cleaned_content)
             new_record = ChangeRecord(
                 timestamp=now,
                 updated_at=now,
@@ -228,6 +270,8 @@ class PaneChangeQueue:
                 content_snapshot=cleaned_content,
                 diff_summary=diff_summary,
                 changed_lines=changed_lines,
+                newline_count=newline_count,
+                char_count=char_count,
             )
             self._records.append(new_record)
             self._trim()
@@ -276,3 +320,57 @@ class PaneChangeQueue:
     def last_render_time(self) -> datetime | None:
         """上次渲染时间"""
         return self._last_render_time
+
+    # === Heuristic helper methods ===
+
+    def get_newline_delta(self) -> int:
+        """Get newline count change between base and tail (for heuristic_run gate)"""
+        if len(self._records) < 2:
+            return 0
+        return self._records[-1].newline_count - self._records[-2].newline_count
+
+    def get_burst_length(self) -> int:
+        """Get char count increase between base and tail (for heuristic_run gate)"""
+        if len(self._records) < 2:
+            return 0
+        delta = self._records[-1].char_count - self._records[-2].char_count
+        return max(0, delta)
+
+    def get_tail_lines(self, n: int = 5, raw: bool = True) -> list[str]:
+        """Get last N lines from tail content
+
+        Args:
+            n: Number of lines to return
+            raw: If True, use raw (uncleaned) content for pattern matching.
+                 If False, use cleaned content.
+        """
+        if not self._records:
+            return []
+        if raw:
+            content = self._records[-1].raw_tail
+        else:
+            content = self._records[-1].content_snapshot
+        if not content:
+            return []
+        lines = content.split('\n')
+        return lines[-n:] if len(lines) >= n else lines
+
+    def get_quiet_duration(self) -> float:
+        """Get seconds since last content change (for quiet thresholds)
+
+        Uses dedicated _last_change_at tracking, independent of record push.
+        This ensures small updates still age into quiet periods.
+        """
+        if self._last_change_at is None:
+            return 0.0
+        return (datetime.now() - self._last_change_at).total_seconds()
+
+    def is_hash_stable(self) -> bool:
+        """Check if content has been stable (no changes since last check)
+
+        Uses dedicated hash tracking for accurate quiet detection.
+        """
+        if not self._records:
+            return False
+        current_hash = self._records[-1].content_hash
+        return current_hash == self._last_hash

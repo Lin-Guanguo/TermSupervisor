@@ -74,11 +74,77 @@ MASK_COMMANDS = False  # 是否完全隐藏命令内容（隐私模式）
 # === 指标配置 ===
 METRICS_ENABLED = True  # 是否启用指标收集
 
-# === 内容启发式配置（Phase 4，可选，默认关闭）===
-HEURISTICS_ENABLED = True  # 是否启用内容启发式分析
-HEURISTICS_ALLOWED_SOURCES = {"gemini", "codex", "copilot"}  # 允许的源（非 shell/claude-code）
-HEURISTICS_IDLE_TIMEOUT_SECONDS = 30.0  # 启发式 idle 超时（秒）
-HEURISTICS_MIN_ACTIVITY_LINES = 3  # 最少活动行数
+# === 内容启发式配置 ===
+# Feature toggle
+CONTENT_HEURISTIC_ENABLED = True  # Master switch for content heuristics
+
+# Pane whitelist (only run heuristics for these process/title patterns)
+CONTENT_HEURISTIC_PANE_WHITELIST = {"gemini", "codex", "copilot"}
+
+# Job whitelist (for jobName-based gating; defaults to same as pane whitelist)
+CONTENT_HEURISTIC_JOB_WHITELIST = {"gemini", "codex", "copilot", "python", "node"}
+
+# Prefer jobName over title when both are available
+CONTENT_HEURISTIC_PREFER_JOB_NAME = True
+
+# Command line redaction: max length before truncation
+COMMAND_LINE_MAX_LENGTH = 50
+
+# Prompt silence gate: heuristics only activate when PromptMonitor has been
+# silent for this duration (seconds); prevents double-firing with shell hooks
+CONTENT_T_PROMPT_SILENCE = 5.0
+
+# Quiet thresholds for signal detection (seconds)
+CONTENT_T_QUIET_DONE = 2.0   # Quiet time before heuristic_done
+CONTENT_T_QUIET_IDLE = 5.0   # Quiet time before heuristic_idle
+CONTENT_T_QUIET_WAIT = 1.0   # Quiet time before heuristic_wait
+
+# Debounce and re-emit
+CONTENT_HEURISTIC_DEBOUNCE_SEC = 1.0     # Per-signal debounce window
+CONTENT_HEURISTIC_REEMIT_IDLE_SEC = 30.0  # Periodic idle re-emit interval
+
+# Newline/burst gate for heuristic_run
+CONTENT_HEURISTIC_MIN_NEWLINES = 1       # Min newline increase to trigger run
+CONTENT_HEURISTIC_MIN_BURST_CHARS = 50   # Alternative: burst length threshold
+
+# Regex patterns (maintain here; add new anchors centrally)
+# Prompt anchors: shell prompts, REPL prompts (>>>, In[n]:, Pdb, Gemini>)
+CONTENT_PROMPT_ANCHOR_REGEX = (
+    r"(?:[$#%>] |❯|➜|>>>|\.\.\.|\(Pdb\)|In \[\d+\]:|[A-Za-z]+> )\s*$"
+)
+
+# Interactivity patterns: y/n prompts, questions, press-to-continue
+CONTENT_INTERACTIVITY_REGEX = (
+    r"(?:\([yY]/[nN]\)|\[[yY]/[nN]\]|\?\s*$|:\s*$"
+    r"|Press .* to .*|Press Enter to continue\.?\s*$|Select.*:\s*$)"
+)
+
+# Spinner patterns (progress indicators)
+CONTENT_SPINNER_PATTERNS = [
+    r"\.{3,}$",           # Trailing ellipsis
+    r"[|/\\-]$",          # Spinner chars at end
+    r"\d+%",              # Percentage
+    r"ETA",               # ETA indicator
+    r"MB/s|KB/s",         # Transfer rate
+    r"⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏",  # Braille spinner
+]
+
+# Completion tokens for heuristic_done
+CONTENT_COMPLETION_TOKENS = [
+    "done", "finished", "success", "complete", "completed",
+    "exit code 0", "ready", "applied", "updated",
+]
+
+# Negative patterns: suppress heuristics when these appear (e.g., spinners ending with >)
+CONTENT_NEGATIVE_PATTERNS = [
+    r"⠋>|⠙>|⠹>|⠸>|⠼>|⠴>|⠦>|⠧>|⠇>|⠏>",  # Spinner followed by prompt-like char
+]
+
+# Legacy config aliases (deprecated, kept for backward compatibility)
+HEURISTICS_ENABLED = CONTENT_HEURISTIC_ENABLED
+HEURISTICS_ALLOWED_SOURCES = CONTENT_HEURISTIC_PANE_WHITELIST
+HEURISTICS_IDLE_TIMEOUT_SECONDS = CONTENT_T_QUIET_IDLE
+HEURISTICS_MIN_ACTIVITY_LINES = 3  # Not used in new system
 
 # 旧配置别名
 INTERVAL = POLL_INTERVAL

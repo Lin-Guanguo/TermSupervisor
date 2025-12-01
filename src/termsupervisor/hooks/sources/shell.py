@@ -4,6 +4,7 @@
 - 接收 iTerm2 PromptMonitor 命令事件
 - 清洗命令字符串（去除 NUL/newlines，截断）
 - 通过 emit_event 发送事件（由 HookManager 处理日志/指标）
+- 暴露 PromptMonitor 状态给内容启发式分析器
 """
 
 import re
@@ -12,7 +13,7 @@ from typing import TYPE_CHECKING
 import iterm2
 
 from ..sources.base import HookSource
-from ..prompt_monitor import PromptMonitorManager
+from ..prompt_monitor import PromptMonitorManager, PromptMonitorStatus
 from ...telemetry import get_logger
 from ...config import LOG_MAX_CMD_LEN
 
@@ -93,6 +94,10 @@ class ShellHookSource(HookSource):
     async def sync_sessions(self, session_ids: set[str]) -> None:
         """同步 session 列表"""
         await self._prompt_monitor.sync_sessions(session_ids)
+
+    def get_prompt_monitor_status(self, session_id: str) -> PromptMonitorStatus:
+        """Get PromptMonitor status for a session (for heuristic gating)"""
+        return self._prompt_monitor.get_status(session_id)
 
     async def _on_command_event(
         self,

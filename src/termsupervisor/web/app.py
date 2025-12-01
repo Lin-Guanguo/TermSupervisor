@@ -104,6 +104,9 @@ async def start_server(connection: iterm2.Connection):
 
     # 注入 hook_manager 到 supervisor（用于状态获取和 content.changed 事件）
     supervisor.set_hook_manager(components.hook_manager)
+    # 注入 heuristic_analyzer 和 shell_source（用于内容启发式分析）
+    supervisor.set_heuristic_analyzer(components.heuristic_analyzer)
+    supervisor.set_shell_source(components.shell_source)
 
     # 启动 Timer（LONG_RUNNING 检查 + Pane 延迟任务）
     timer_task = asyncio.create_task(components.timer.run())

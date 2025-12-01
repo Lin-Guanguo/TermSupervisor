@@ -1,7 +1,7 @@
 """Bootstrap - 集中构造系统组件
 
 职责：
-- 创建 Timer, HookManager, 各 Source, Receiver
+- 创建 Timer, HookManager, 各 Source, Receiver, ContentHeuristicAnalyzer
 - 注册 LONG_RUNNING tick 回调
 - 绑定 focus_checker
 - 返回 RuntimeComponents 供调用方使用
@@ -20,6 +20,7 @@ from ..hooks.receiver import HookReceiver
 from ..hooks.sources.shell import ShellHookSource
 from ..hooks.sources.claude_code import ClaudeCodeHookSource
 from ..hooks.sources.iterm import ItermHookSource
+from ..analysis.content_heuristic import ContentHeuristicAnalyzer
 from ..config import TIMER_TICK_INTERVAL
 from ..telemetry import get_logger
 
@@ -42,6 +43,7 @@ class RuntimeComponents:
     shell_source: ShellHookSource
     claude_code_source: ClaudeCodeHookSource
     iterm_source: ItermHookSource
+    heuristic_analyzer: ContentHeuristicAnalyzer
 
     async def start_sources(self) -> None:
         """启动所有 source（Supervisor 启动后调用）"""
@@ -108,6 +110,10 @@ def bootstrap(
     receiver = HookReceiver(hook_manager)
     receiver.register_adapter(claude_code_source)
 
+    # 7. 创建 ContentHeuristicAnalyzer 并绑定 emit 回调
+    heuristic_analyzer = ContentHeuristicAnalyzer()
+    heuristic_analyzer.set_emit_callback(hook_manager.emit_event)
+
     logger.info("[Bootstrap] Components created")
 
     _current_components = RuntimeComponents(
@@ -117,6 +123,7 @@ def bootstrap(
         shell_source=shell_source,
         claude_code_source=claude_code_source,
         iterm_source=iterm_source,
+        heuristic_analyzer=heuristic_analyzer,
     )
 
     return _current_components
@@ -149,6 +156,16 @@ def get_current_timer() -> "Timer | None":
     """
     if _current_components is not None:
         return _current_components.timer
+    return None
+
+
+def get_current_heuristic_analyzer() -> "ContentHeuristicAnalyzer | None":
+    """获取当前运行的 ContentHeuristicAnalyzer
+
+    如果 bootstrap() 还没调用，返回 None。
+    """
+    if _current_components is not None:
+        return _current_components.heuristic_analyzer
     return None
 
 

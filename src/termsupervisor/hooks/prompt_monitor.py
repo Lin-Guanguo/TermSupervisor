@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Callable, Awaitable
 
 import iterm2
@@ -13,6 +15,13 @@ logger = logging.getLogger(__name__)
 # event_type: "command_start" | "command_end"
 # info: 命令字符串(start) 或 退出码(end)
 CommandEventCallback = Callable[[str, str, str | int], Awaitable[None]]
+
+
+@dataclass
+class PromptMonitorStatus:
+    """Per-pane PromptMonitor status for content heuristic gating"""
+    integration_active: bool = False  # True if shell integration is working
+    last_prompt_event_at: float | None = None  # Timestamp of last prompt event
 
 
 class PromptMonitorManager:
@@ -31,10 +40,24 @@ class PromptMonitorManager:
         self._monitors: dict[str, asyncio.Task] = {}  # session_id -> monitor task
         self._running = False
         self._on_command: CommandEventCallback | None = None
+        # Per-session status for heuristic gating
+        self._status: dict[str, PromptMonitorStatus] = {}  # session_id -> status
 
     def set_command_callback(self, callback: CommandEventCallback) -> None:
         """设置命令事件回调"""
         self._on_command = callback
+
+    def get_status(self, session_id: str) -> PromptMonitorStatus:
+        """Get PromptMonitor status for a session (for heuristic gating)"""
+        if session_id not in self._status:
+            self._status[session_id] = PromptMonitorStatus()
+        return self._status[session_id]
+
+    def _update_status(self, session_id: str, integration_active: bool) -> None:
+        """Update session status after prompt event"""
+        status = self.get_status(session_id)
+        status.integration_active = integration_active
+        status.last_prompt_event_at = datetime.now().timestamp()
 
     async def start(self) -> None:
         """启动监控"""
@@ -123,6 +146,8 @@ class PromptMonitorManager:
                             # info 是命令字符串
                             command = info if info else ""
                             logger.debug(f"[PromptMonitor] {session_id} 命令开始: {command[:50]}")
+                            # Update status: integration is active and working
+                            self._update_status(session_id, integration_active=True)
                             if self._on_command:
                                 await self._on_command(session_id, "command_start", command)
 
@@ -130,6 +155,8 @@ class PromptMonitorManager:
                             # info 是退出码
                             exit_code = info if info is not None else 0
                             logger.debug(f"[PromptMonitor] {session_id} 命令结束: exit={exit_code}")
+                            # Update status: integration is active and working
+                            self._update_status(session_id, integration_active=True)
                             if self._on_command:
                                 await self._on_command(session_id, "command_end", exit_code)
 

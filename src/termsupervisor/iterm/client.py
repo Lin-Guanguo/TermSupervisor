@@ -1,8 +1,51 @@
 """iTerm2 API 客户端封装"""
 
+import asyncio
+import re
+from dataclasses import dataclass
+
 import iterm2
 
+from termsupervisor import config
 from termsupervisor.iterm.naming import set_session_name, set_tab_name, set_window_name
+
+# Token-like patterns to mask (API keys, secrets, tokens)
+_TOKEN_PATTERNS = [
+    re.compile(r"(sk-[a-zA-Z0-9]{20,})"),  # OpenAI keys
+    re.compile(r"(ghp_[a-zA-Z0-9]{36,})"),  # GitHub PAT
+    re.compile(r"(gho_[a-zA-Z0-9]{36,})"),  # GitHub OAuth
+    re.compile(r"(glpat-[a-zA-Z0-9\-]{20,})"),  # GitLab PAT
+    re.compile(r"(xox[baprs]-[a-zA-Z0-9\-]{10,})"),  # Slack tokens
+    re.compile(r"([a-zA-Z0-9_\-]{32,})"),  # Generic long alphanumeric (likely token)
+]
+
+
+def _mask_tokens(text: str) -> str:
+    """Mask token-like patterns in text"""
+    result = text
+    for pattern in _TOKEN_PATTERNS:
+        result = pattern.sub(lambda m: m.group(0)[:4] + "***", result)
+    return result
+
+
+@dataclass
+class JobMetadata:
+    """Foreground job metadata from iTerm2 Shell Integration"""
+    job_name: str = ""
+    job_pid: int | None = None
+    command_line: str = ""  # Redacted for logging
+    tty: str = ""
+
+    def redacted_command_line(self) -> str:
+        """Return truncated and token-masked command line for safe logging"""
+        if not self.command_line:
+            return ""
+        # First mask tokens, then truncate
+        masked = _mask_tokens(self.command_line)
+        max_len = config.COMMAND_LINE_MAX_LENGTH
+        if len(masked) <= max_len:
+            return masked
+        return masked[:max_len] + "..."
 
 
 class ITerm2Client:
@@ -151,6 +194,55 @@ class ITerm2Client:
             return self._normalize_content("\n".join(lines))
         except Exception as e:
             return f"[Error: {e}]"
+
+    async def get_session_job_name(self, session: iterm2.Session) -> str:
+        """获取 session 当前前台进程名 (用于 heuristic whitelist)
+
+        Returns:
+            前台进程名 (e.g. "gemini", "python", "node")，失败时返回空字符串
+        """
+        try:
+            job_name = await session.async_get_variable("jobName")
+            return job_name or ""
+        except Exception:
+            return ""
+
+    async def get_session_job_metadata(self, session: iterm2.Session) -> JobMetadata:
+        """Fetch foreground job metadata via asyncio.gather
+
+        Requires iTerm2 Shell Integration for job fields; tty always available.
+        Missing vars treated as empty; jobPid cast to int when possible.
+        """
+        try:
+            results = await asyncio.gather(
+                session.async_get_variable("jobName"),
+                session.async_get_variable("jobPid"),
+                session.async_get_variable("commandLine"),
+                session.async_get_variable("tty"),
+                return_exceptions=True
+            )
+            job_name, job_pid, cmd_line, tty = results
+
+            # Sanitize results
+            job_name_str = job_name if isinstance(job_name, str) else ""
+            tty_str = tty if isinstance(tty, str) else ""
+            cmd_line_str = cmd_line if isinstance(cmd_line, str) else ""
+
+            # Cast jobPid to int
+            job_pid_int: int | None = None
+            if isinstance(job_pid, (int, float)):
+                job_pid_int = int(job_pid)
+            elif isinstance(job_pid, str) and job_pid.isdigit():
+                job_pid_int = int(job_pid)
+
+            return JobMetadata(
+                job_name=job_name_str,
+                job_pid=job_pid_int,
+                command_line=cmd_line_str,
+                tty=tty_str
+            )
+        except Exception:
+            return JobMetadata()
 
     @staticmethod
     def _normalize_content(content: str) -> str:
