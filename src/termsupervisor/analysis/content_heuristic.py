@@ -11,6 +11,10 @@ Signals emitted:
 - content.heuristic_done: RUNNING → DONE (prompt anchor or completion token)
 - content.heuristic_wait: RUNNING → WAITING_APPROVAL (spinner or interactivity)
 - content.heuristic_idle: RUNNING → IDLE (quiet, no anchors)
+
+Stage 2 additions (keyword-driven transitions):
+- Interrupt patterns (e.g., "esc to interrupt"): appearance → RUNNING, disappearance + quiet → DONE
+- Approval patterns (e.g., "1. Yes"): appearance → WAITING_APPROVAL
 """
 
 import re
@@ -35,6 +39,10 @@ _SPINNER_RES = [re.compile(p) for p in config.CONTENT_SPINNER_PATTERNS]
 _NEGATIVE_RES = [re.compile(p) for p in config.CONTENT_NEGATIVE_PATTERNS]
 _COMPLETION_TOKENS = [t.lower() for t in config.CONTENT_COMPLETION_TOKENS]
 
+# Stage 2: Keyword patterns (case-insensitive)
+_INTERRUPT_RES = [re.compile(p, re.IGNORECASE) for p in config.CONTENT_INTERRUPT_PATTERNS]
+_APPROVAL_RES = [re.compile(p, re.IGNORECASE) for p in config.CONTENT_APPROVAL_PATTERNS]
+
 
 @dataclass
 class HeuristicPaneState:
@@ -43,6 +51,12 @@ class HeuristicPaneState:
     last_signal_at: float = 0.0  # Timestamp of last emission
     last_idle_emit_at: float = 0.0  # For periodic idle re-emit
     suppressed_until_reactivation: bool = False  # After DONE/FAILED
+
+    # Stage 2: Keyword tracking
+    interrupt_seen_at: float | None = None  # Timestamp when interrupt first appeared
+    interrupt_present: bool = False  # Whether interrupt is currently visible
+    approval_seen_at: float | None = None  # Timestamp when approval first appeared
+    approval_present: bool = False  # Whether approval is currently visible
 
 
 @dataclass
@@ -156,6 +170,25 @@ class ContentHeuristicAnalyzer:
         line_lower = line.lower()
         return any(token in line_lower for token in _COMPLETION_TOKENS)
 
+    # === Stage 2: Keyword Matchers ===
+
+    def _matches_interrupt(self, content: str) -> bool:
+        """Check if content contains interrupt pattern (e.g., 'esc to interrupt')"""
+        return any(r.search(content) for r in _INTERRUPT_RES)
+
+    def _matches_approval(self, content: str) -> bool:
+        """Check if content contains approval pattern (e.g., '1. Yes')"""
+        return any(r.search(content) for r in _APPROVAL_RES)
+
+    def _check_keywords_in_content(self, tail_lines: list[str]) -> tuple[bool, bool]:
+        """Check for interrupt/approval keywords in tail content
+
+        Returns:
+            (interrupt_present, approval_present)
+        """
+        content = "\n".join(tail_lines)
+        return self._matches_interrupt(content), self._matches_approval(content)
+
     # === Signal Detection ===
 
     def _check_debounce(
@@ -222,13 +255,30 @@ class ContentHeuristicAnalyzer:
         if self._matches_negative(last_line):
             return HeuristicResult(reason="negative_pattern")
 
+        # Stage 2: Check keyword presence in tail content
+        interrupt_now, approval_now = self._check_keywords_in_content(tail_lines)
+
+        # Update keyword state and detect transitions
+        interrupt_appeared = interrupt_now and not state.interrupt_present
+        interrupt_disappeared = not interrupt_now and state.interrupt_present
+        approval_appeared = approval_now and not state.approval_present
+
+        # Update tracking state
+        if interrupt_now and not state.interrupt_present:
+            state.interrupt_seen_at = now
+        state.interrupt_present = interrupt_now
+
+        if approval_now and not state.approval_present:
+            state.approval_seen_at = now
+        state.approval_present = approval_now
+
         # === Signal detection by current state ===
 
         if current_status == TaskStatus.IDLE:
             # heuristic_run is NEVER suppressed - it's the reactivation signal
-            # This allows hook-less panes to re-enter RUNNING after idle/done
-            return self._detect_run(
-                state, now, newline_delta, burst_length, last_line
+            return self._detect_run_from_idle(
+                state, now, newline_delta, burst_length, last_line,
+                interrupt_appeared
             )
 
         elif current_status in {TaskStatus.RUNNING, TaskStatus.LONG_RUNNING}:
@@ -236,24 +286,40 @@ class ContentHeuristicAnalyzer:
             if state.suppressed_until_reactivation:
                 return HeuristicResult(reason="suppressed_after_resolution")
             # Check for heuristic_done, heuristic_wait, or heuristic_idle
-            return self._detect_completion(
-                state, now, quiet_duration, hash_stable, last_line
+            return self._detect_completion_from_running(
+                state, now, quiet_duration, hash_stable, last_line,
+                interrupt_disappeared, approval_appeared
             )
 
-        # For other states (DONE, FAILED, WAITING), check if we should clear suppression
-        # on next RUNNING entry (handled by explicit start hooks or heuristic_run)
+        # For other states (DONE, FAILED, WAITING), no heuristic signals
         return HeuristicResult(reason="no_signal")
 
-    def _detect_run(
+    def _detect_run_from_idle(
         self,
         state: HeuristicPaneState,
         now: float,
         newline_delta: int,
         burst_length: int,
         last_line: str,
+        interrupt_appeared: bool,
     ) -> HeuristicResult:
-        """Detect heuristic_run: IDLE → RUNNING"""
-        # Newline gate: must have new output (not just typing)
+        """Detect heuristic_run: IDLE → RUNNING
+
+        Stage 2: interrupt appearance triggers RUNNING even without newline/burst.
+        """
+        # Stage 2: Interrupt appearance triggers RUNNING immediately
+        if interrupt_appeared:
+            if self._check_debounce(state, "heuristic_run", now):
+                return HeuristicResult(reason="debounce")
+            state.suppressed_until_reactivation = False
+            state.last_signal = "heuristic_run"
+            state.last_signal_at = now
+            return HeuristicResult(
+                signal="heuristic_run",
+                reason="interrupt_appeared"
+            )
+
+        # Stage 1: Newline gate - must have new output (not just typing)
         has_newlines = newline_delta >= config.CONTENT_HEURISTIC_MIN_NEWLINES
         has_burst = burst_length >= config.CONTENT_HEURISTIC_MIN_BURST_CHARS
 
@@ -274,30 +340,65 @@ class ContentHeuristicAnalyzer:
             reason=f"newlines={newline_delta} burst={burst_length}"
         )
 
-    def _detect_completion(
+    def _detect_completion_from_running(
         self,
         state: HeuristicPaneState,
         now: float,
         quiet_duration: float,
         hash_stable: bool,
         last_line: str,
+        interrupt_disappeared: bool,
+        approval_appeared: bool,
     ) -> HeuristicResult:
-        """Detect completion signals: done, wait, or idle"""
+        """Detect completion signals: done, wait, or idle
 
-        # === heuristic_done: prompt anchor or completion token ===
+        Stage 2 priority order:
+        1. DONE (prompt anchor or completion token) - highest priority
+        2. DONE (interrupt disappeared + quiet/anchor)
+        3. WAITING (approval appeared)
+        4. WAITING (spinner/interactivity)
+        5. IDLE (quiet + stable hash)
+        """
+
+        # === Priority 1: heuristic_done via prompt anchor or completion token ===
         if quiet_duration >= config.CONTENT_T_QUIET_DONE:
             if self._matches_prompt_anchor(last_line) or self._matches_completion_token(last_line):
                 if self._check_debounce(state, "heuristic_done", now):
                     return HeuristicResult(reason="debounce")
-                state.last_signal = "heuristic_done"
-                state.last_signal_at = now
-                state.suppressed_until_reactivation = True
+                self._emit_done(state, now)
                 return HeuristicResult(
                     signal="heuristic_done",
                     reason=f"prompt_anchor quiet={quiet_duration:.1f}s"
                 )
 
-        # === heuristic_wait: spinner or interactivity ===
+        # === Priority 2: heuristic_done via interrupt disappearance ===
+        # Only trigger DONE when interrupt disappeared AND (quiet >= threshold OR prompt/completion anchor)
+        if interrupt_disappeared:
+            has_quiet = quiet_duration >= config.CONTENT_T_INTERRUPT_DONE
+            has_anchor = self._matches_prompt_anchor(last_line) or self._matches_completion_token(last_line)
+            if has_quiet or has_anchor:
+                if self._check_debounce(state, "heuristic_done", now):
+                    return HeuristicResult(reason="debounce")
+                self._emit_done(state, now)
+                return HeuristicResult(
+                    signal="heuristic_done",
+                    reason=f"interrupt_disappeared quiet={quiet_duration:.1f}s"
+                )
+            # Interrupt disappeared but not enough quiet - no DONE yet
+            return HeuristicResult(reason="interrupt_disappeared_no_quiet")
+
+        # === Priority 3: heuristic_wait via approval appearance ===
+        if approval_appeared:
+            if self._check_debounce(state, "heuristic_wait", now):
+                return HeuristicResult(reason="debounce")
+            state.last_signal = "heuristic_wait"
+            state.last_signal_at = now
+            return HeuristicResult(
+                signal="heuristic_wait",
+                reason="approval_appeared"
+            )
+
+        # === Priority 4: heuristic_wait via spinner or interactivity ===
         if quiet_duration >= config.CONTENT_T_QUIET_WAIT:
             if self._matches_spinner(last_line) or self._matches_interactivity(last_line):
                 if self._check_debounce(state, "heuristic_wait", now):
@@ -309,7 +410,7 @@ class ContentHeuristicAnalyzer:
                     reason=f"spinner/interactivity quiet={quiet_duration:.1f}s"
                 )
 
-        # === heuristic_idle: quiet with stable hash, no patterns ===
+        # === Priority 5: heuristic_idle via quiet + stable hash ===
         if quiet_duration >= config.CONTENT_T_QUIET_IDLE:
             if hash_stable:
                 # Don't emit if matches any active pattern
@@ -337,6 +438,15 @@ class ContentHeuristicAnalyzer:
                 )
 
         return HeuristicResult(reason="no_completion_signal")
+
+    def _emit_done(self, state: HeuristicPaneState, now: float) -> None:
+        """Helper to update state for heuristic_done emission"""
+        state.last_signal = "heuristic_done"
+        state.last_signal_at = now
+        state.suppressed_until_reactivation = True
+        # Clear interrupt tracking on DONE
+        state.interrupt_seen_at = None
+        state.interrupt_present = False
 
     async def process_and_emit(
         self,

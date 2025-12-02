@@ -140,6 +140,25 @@ CONTENT_NEGATIVE_PATTERNS = [
     r"⠋>|⠙>|⠹>|⠸>|⠼>|⠴>|⠦>|⠧>|⠇>|⠏>",  # Spinner followed by prompt-like char
 ]
 
+# === Stage 2: Keyword-driven transitions ===
+# Interrupt patterns: presence triggers RUNNING, disappearance (with quiet/anchor) triggers DONE
+CONTENT_INTERRUPT_PATTERNS = [
+    r"esc to interrupt",
+    r"esc to cancel",
+    r"press esc to stop",
+]
+
+# Approval patterns: presence triggers WAITING_APPROVAL
+CONTENT_APPROVAL_PATTERNS = [
+    r"1\.\s*Yes",              # "1. Yes" menu option
+    r"1\.\s*Yes,?\s*allow",    # "1. Yes, allow once" variant
+    r"\[Y\]es",                # "[Y]es" prompt
+]
+
+# Optional: separate quiet threshold for interrupt disappearance
+# (defaults to CONTENT_T_QUIET_DONE if not set)
+CONTENT_T_INTERRUPT_DONE = CONTENT_T_QUIET_DONE
+
 # Legacy config aliases (deprecated, kept for backward compatibility)
 HEURISTICS_ENABLED = CONTENT_HEURISTIC_ENABLED
 HEURISTICS_ALLOWED_SOURCES = CONTENT_HEURISTIC_PANE_WHITELIST

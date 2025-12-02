@@ -677,6 +677,418 @@ class TestNegativePatterns:
         assert "negative_pattern" in result.reason
 
 
+# === Stage 2: Keyword-driven transitions ===
+
+
+class TestInterruptPatterns:
+    """Test Stage 2 interrupt keyword detection"""
+
+    def test_matches_esc_to_interrupt(self, analyzer):
+        """'esc to interrupt' should match interrupt pattern"""
+        assert analyzer._matches_interrupt("Press esc to interrupt")
+        assert analyzer._matches_interrupt("esc to interrupt")
+        assert analyzer._matches_interrupt("ESC TO INTERRUPT")
+
+    def test_matches_esc_to_cancel(self, analyzer):
+        """'esc to cancel' should match interrupt pattern"""
+        assert analyzer._matches_interrupt("esc to cancel")
+        assert analyzer._matches_interrupt("Press esc to cancel the operation")
+
+    def test_matches_press_esc_to_stop(self, analyzer):
+        """'press esc to stop' should match interrupt pattern"""
+        assert analyzer._matches_interrupt("press esc to stop")
+
+    def test_non_interrupt_not_detected(self, analyzer):
+        """Regular text should not match interrupt patterns"""
+        assert not analyzer._matches_interrupt("Hello world")
+        assert not analyzer._matches_interrupt("Processing...")
+        assert not analyzer._matches_interrupt("Press Enter to continue")
+
+
+class TestApprovalPatterns:
+    """Test Stage 2 approval keyword detection"""
+
+    def test_matches_1_yes(self, analyzer):
+        """'1. Yes' should match approval pattern"""
+        assert analyzer._matches_approval("1. Yes")
+        assert analyzer._matches_approval("1.Yes")
+        assert analyzer._matches_approval("1.  Yes")
+
+    def test_matches_1_yes_allow(self, analyzer):
+        """'1. Yes, allow' should match approval pattern"""
+        assert analyzer._matches_approval("1. Yes, allow once")
+        assert analyzer._matches_approval("1. Yes allow")
+
+    def test_matches_bracket_yes(self, analyzer):
+        """'[Y]es' should match approval pattern"""
+        assert analyzer._matches_approval("[Y]es")
+
+    def test_non_approval_not_detected(self, analyzer):
+        """Regular text should not match approval patterns"""
+        assert not analyzer._matches_approval("Hello world")
+        assert not analyzer._matches_approval("Yes")
+        assert not analyzer._matches_approval("2. No")
+
+
+def make_queue_with_content_and_quiet(
+    content: str,
+    quiet_seconds: float,
+    session_id: str = "test-session"
+) -> PaneChangeQueue:
+    """Create a queue with content that has been stable for quiet_seconds"""
+    queue = PaneChangeQueue(session_id)
+    queue.check_and_record(content)
+    now = datetime.now()
+    old_time = datetime.fromtimestamp(now.timestamp() - quiet_seconds - 1)
+    if queue._records:
+        for record in queue._records:
+            record.timestamp = old_time
+            record.updated_at = old_time
+            if not record.raw_tail:
+                record.raw_tail = content
+    queue._last_change_at = old_time
+    return queue
+
+
+class TestInterruptAppearance:
+    """Test Stage 2: interrupt appearance triggers RUNNING"""
+
+    def test_interrupt_appearance_triggers_run_from_idle(self, analyzer, prompt_status_silent):
+        """Interrupt appearance should trigger heuristic_run from IDLE (no newline needed)"""
+        # First analyze without interrupt (sets baseline)
+        queue1 = make_queue_with_content("Starting task...")
+        analyzer.analyze(
+            pane_id="test",
+            pane_title="-zsh",
+            job_name="gemini",
+            current_status=TaskStatus.IDLE,
+            current_source="content",
+            prompt_status=prompt_status_silent,
+            queue=queue1,
+        )
+
+        # Now analyze with interrupt appearing (same pane)
+        queue2 = make_queue_with_content("Working... esc to interrupt")
+        result = analyzer.analyze(
+            pane_id="test",
+            pane_title="-zsh",
+            job_name="gemini",
+            current_status=TaskStatus.IDLE,
+            current_source="content",
+            prompt_status=prompt_status_silent,
+            queue=queue2,
+        )
+
+        assert result.signal == "heuristic_run"
+        assert "interrupt_appeared" in result.reason
+
+    def test_interrupt_persistence_no_reemit(self, analyzer, prompt_status_silent):
+        """Interrupt persisting should NOT re-emit heuristic_run"""
+        # First appearance
+        queue1 = make_queue_with_content("Working... esc to interrupt")
+        result1 = analyzer.analyze(
+            pane_id="test",
+            pane_title="-zsh",
+            job_name="gemini",
+            current_status=TaskStatus.IDLE,
+            current_source="content",
+            prompt_status=prompt_status_silent,
+            queue=queue1,
+        )
+        assert result1.signal == "heuristic_run"
+
+        # Clear debounce
+        state = analyzer._get_pane_state("test")
+        state.last_signal_at = 0.0
+
+        # Same content (interrupt still present)
+        queue2 = make_queue_with_content("Working... esc to interrupt")
+        result2 = analyzer.analyze(
+            pane_id="test",
+            pane_title="-zsh",
+            job_name="gemini",
+            current_status=TaskStatus.IDLE,
+            current_source="content",
+            prompt_status=prompt_status_silent,
+            queue=queue2,
+        )
+        # Should not emit again (interrupt_present was already True)
+        assert result2.signal is None or "newline_gate" in result2.reason
+
+
+class TestInterruptDisappearance:
+    """Test Stage 2: interrupt disappearance triggers DONE (with conditions)"""
+
+    def test_interrupt_disappear_with_quiet_triggers_done(self, analyzer, prompt_status_silent):
+        """Interrupt disappearing with sufficient quiet should trigger DONE"""
+        # Setup: interrupt present, state RUNNING
+        queue1 = make_queue_with_content("Working... esc to interrupt")
+        analyzer.analyze(
+            pane_id="test",
+            pane_title="-zsh",
+            job_name="gemini",
+            current_status=TaskStatus.RUNNING,
+            current_source="content",
+            prompt_status=prompt_status_silent,
+            queue=queue1,
+        )
+
+        # Mark state as interrupt_present
+        state = analyzer._get_pane_state("test")
+        state.interrupt_present = True
+        state.last_signal_at = 0.0  # Clear debounce
+
+        # Interrupt disappears with quiet (use content without completion tokens)
+        queue2 = make_queue_with_content_and_quiet("All operations stopped", quiet_seconds=3.0)
+        result = analyzer.analyze(
+            pane_id="test",
+            pane_title="-zsh",
+            job_name="gemini",
+            current_status=TaskStatus.RUNNING,
+            current_source="content",
+            prompt_status=prompt_status_silent,
+            queue=queue2,
+        )
+
+        assert result.signal == "heuristic_done"
+        assert "interrupt_disappeared" in result.reason
+
+    def test_interrupt_disappear_without_quiet_no_done(self, analyzer, prompt_status_silent):
+        """Interrupt disappearing WITHOUT quiet should NOT trigger DONE"""
+        # Setup: mark interrupt as present
+        state = analyzer._get_pane_state("test")
+        state.interrupt_present = True
+        state.last_signal_at = 0.0
+
+        # Interrupt disappears but no quiet (content just changed)
+        queue = make_queue_with_content("New output line")  # No quiet simulation
+        result = analyzer.analyze(
+            pane_id="test",
+            pane_title="-zsh",
+            job_name="gemini",
+            current_status=TaskStatus.RUNNING,
+            current_source="content",
+            prompt_status=prompt_status_silent,
+            queue=queue,
+        )
+
+        assert result.signal is None
+        assert "interrupt_disappeared_no_quiet" in result.reason
+
+    def test_interrupt_disappear_with_prompt_anchor_triggers_done(self, analyzer, prompt_status_silent):
+        """Interrupt disappearing with prompt anchor should trigger DONE (no quiet needed)"""
+        # Setup: mark interrupt as present
+        state = analyzer._get_pane_state("test")
+        state.interrupt_present = True
+        state.last_signal_at = 0.0
+
+        # Interrupt disappears, prompt anchor present (no quiet)
+        queue = make_queue_with_content(">>> ")
+        result = analyzer.analyze(
+            pane_id="test",
+            pane_title="-zsh",
+            job_name="gemini",
+            current_status=TaskStatus.RUNNING,
+            current_source="content",
+            prompt_status=prompt_status_silent,
+            queue=queue,
+        )
+
+        assert result.signal == "heuristic_done"
+        assert "interrupt_disappeared" in result.reason
+
+
+class TestApprovalAppearance:
+    """Test Stage 2: approval appearance triggers WAITING"""
+
+    def test_approval_appearance_triggers_wait(self, analyzer, prompt_status_silent):
+        """Approval pattern appearing should trigger heuristic_wait"""
+        # First analyze without approval
+        queue1 = make_queue_with_content("Processing...")
+        analyzer.analyze(
+            pane_id="test",
+            pane_title="-zsh",
+            job_name="gemini",
+            current_status=TaskStatus.RUNNING,
+            current_source="content",
+            prompt_status=prompt_status_silent,
+            queue=queue1,
+        )
+
+        state = analyzer._get_pane_state("test")
+        state.last_signal_at = 0.0
+
+        # Now with approval appearing
+        queue2 = make_queue_with_content("Do you want to proceed?\n1. Yes\n2. No")
+        result = analyzer.analyze(
+            pane_id="test",
+            pane_title="-zsh",
+            job_name="gemini",
+            current_status=TaskStatus.RUNNING,
+            current_source="content",
+            prompt_status=prompt_status_silent,
+            queue=queue2,
+        )
+
+        assert result.signal == "heuristic_wait"
+        assert "approval_appeared" in result.reason
+
+    def test_approval_persistence_no_reemit(self, analyzer, prompt_status_silent):
+        """Approval persisting should NOT re-emit heuristic_wait"""
+        # First appearance
+        queue1 = make_queue_with_content("1. Yes\n2. No")
+        result1 = analyzer.analyze(
+            pane_id="test",
+            pane_title="-zsh",
+            job_name="gemini",
+            current_status=TaskStatus.RUNNING,
+            current_source="content",
+            prompt_status=prompt_status_silent,
+            queue=queue1,
+        )
+        assert result1.signal == "heuristic_wait"
+
+        # Clear debounce
+        state = analyzer._get_pane_state("test")
+        state.last_signal_at = 0.0
+
+        # Same content (approval still present)
+        queue2 = make_queue_with_content("1. Yes\n2. No")
+        result2 = analyzer.analyze(
+            pane_id="test",
+            pane_title="-zsh",
+            job_name="gemini",
+            current_status=TaskStatus.RUNNING,
+            current_source="content",
+            prompt_status=prompt_status_silent,
+            queue=queue2,
+        )
+        # Should not emit again (approval_present was already True)
+        assert result2.signal is None
+
+
+class TestStage2Priority:
+    """Test Stage 2 signal priority ordering"""
+
+    def test_prompt_anchor_beats_interrupt_disappear(self, analyzer, prompt_status_silent):
+        """Prompt anchor DONE should have higher priority than interrupt disappear DONE"""
+        # Setup: interrupt was present
+        state = analyzer._get_pane_state("test")
+        state.interrupt_present = True
+        state.last_signal_at = 0.0
+
+        # Both conditions met: prompt anchor AND interrupt disappeared
+        queue = make_queue_with_content_and_quiet(">>> ", quiet_seconds=3.0)
+        result = analyzer.analyze(
+            pane_id="test",
+            pane_title="-zsh",
+            job_name="gemini",
+            current_status=TaskStatus.RUNNING,
+            current_source="content",
+            prompt_status=prompt_status_silent,
+            queue=queue,
+        )
+
+        assert result.signal == "heuristic_done"
+        # Should mention prompt_anchor, not interrupt_disappeared
+        assert "prompt_anchor" in result.reason
+
+    def test_approval_beats_spinner(self, analyzer, prompt_status_silent):
+        """Approval appearance should have higher priority than spinner WAIT"""
+        # First analyze to set baseline (use content without "..." which is a prompt anchor)
+        queue1 = make_queue_with_content("Processing task")
+        analyzer.analyze(
+            pane_id="test",
+            pane_title="-zsh",
+            job_name="gemini",
+            current_status=TaskStatus.RUNNING,
+            current_source="content",
+            prompt_status=prompt_status_silent,
+            queue=queue1,
+        )
+
+        state = analyzer._get_pane_state("test")
+        state.last_signal_at = 0.0
+
+        # Both approval AND spinner present (use percentage spinner, not "...")
+        queue2 = make_queue_with_content_and_quiet("1. Yes\n50%", quiet_seconds=2.0)
+        result = analyzer.analyze(
+            pane_id="test",
+            pane_title="-zsh",
+            job_name="gemini",
+            current_status=TaskStatus.RUNNING,
+            current_source="content",
+            prompt_status=prompt_status_silent,
+            queue=queue2,
+        )
+
+        assert result.signal == "heuristic_wait"
+        # Should be from approval, not spinner
+        assert "approval_appeared" in result.reason
+
+
+class TestStage2StateTracking:
+    """Test Stage 2 per-pane state tracking"""
+
+    def test_interrupt_state_cleared_on_done(self, analyzer, prompt_status_silent):
+        """Interrupt tracking should be cleared when DONE is emitted"""
+        # Setup: interrupt present
+        state = analyzer._get_pane_state("test")
+        state.interrupt_present = True
+        state.interrupt_seen_at = datetime.now().timestamp()
+        state.last_signal_at = 0.0
+
+        # Trigger DONE via interrupt disappear
+        queue = make_queue_with_content_and_quiet("Task done", quiet_seconds=3.0)
+        result = analyzer.analyze(
+            pane_id="test",
+            pane_title="-zsh",
+            job_name="gemini",
+            current_status=TaskStatus.RUNNING,
+            current_source="content",
+            prompt_status=prompt_status_silent,
+            queue=queue,
+        )
+
+        assert result.signal == "heuristic_done"
+        # State should be cleared
+        assert state.interrupt_present is False
+        assert state.interrupt_seen_at is None
+
+    def test_separate_pane_states(self, analyzer, prompt_status_silent):
+        """Different panes should have independent state tracking"""
+        # Pane A: interrupt present
+        queue_a = make_queue_with_content("Pane A: esc to interrupt")
+        analyzer.analyze(
+            pane_id="pane-a",
+            pane_title="-zsh",
+            job_name="gemini",
+            current_status=TaskStatus.IDLE,
+            current_source="content",
+            prompt_status=prompt_status_silent,
+            queue=queue_a,
+        )
+
+        # Pane B: no interrupt
+        queue_b = make_queue_with_content("Pane B: normal output")
+        queue_b.check_and_record("Pane B: normal output\nmore lines")
+        analyzer.analyze(
+            pane_id="pane-b",
+            pane_title="-zsh",
+            job_name="gemini",
+            current_status=TaskStatus.IDLE,
+            current_source="content",
+            prompt_status=prompt_status_silent,
+            queue=queue_b,
+        )
+
+        state_a = analyzer._get_pane_state("pane-a")
+        state_b = analyzer._get_pane_state("pane-b")
+
+        assert state_a.interrupt_present is True
+        assert state_b.interrupt_present is False
+
+
 class TestJobNameTransitions:
     """Test jobName-based gating (zsh -> python -> gemini transitions)"""
 

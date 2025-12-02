@@ -1,6 +1,6 @@
 # Content Heuristic for Long-Running Pane Recovery
 
-Last Updated: 2025-12-01
+Last Updated: 2025-12-02
 
 ## Context
 
@@ -77,49 +77,23 @@ Common suppressions: respect `CONTENT_NEGATIVE_PATTERNS` (e.g., spinners ending 
 - Unit: synthetic PaneChange sequences for prompt+quiet → DONE, burst+newline → RUNNING, spinner/input prompt → WAITING, quiet without anchors → IDLE, debounce and idle re-emit, negative-pattern suppression.
 - Integration-lite: feed PaneChangeQueue with codex-like output while toggling PromptMonitor status to verify the tiered gate (no double-fire when prompts exist, heuristics engage when silent).
 
-## Implementation Priorities
+## Implementation Status
 
-1. Surface PromptMonitor status and silence timer to the analyzer.
-2. Add newline counting/burst detection to the PaneChange feed.
-3. Implement the anchor/interactivity/spinner regex set and config knobs above.
-4. Wire state transitions in `pane/transitions.py` and confirm WAITING fallbacks reuse the existing timers.
+- Shipped (Phases 0–5): config/regex surfaces, prompt-silence gate, newline + burst feed, tiered analyzer, heuristic transitions with WAITING fallbacks, and unit coverage in `tests/analysis/test_content_heuristic.py`.
+- Job metadata capture is live: `jobName`/`jobPid`/`commandLine` are pulled each poll via `ITerm2Client.get_session_job_metadata`, stored on `PaneHistory`, and used by the analyzer; `commandLine` is redacted via token masking + `COMMAND_LINE_MAX_LENGTH`.
+- **Stage 2 shipped**: Keyword-driven transitions for interrupt/approval patterns. Interrupt appearance → RUNNING, interrupt disappearance + quiet/anchor → DONE, approval appearance → WAITING_APPROVAL.
+- Next active work: optional telemetry/UI surfacing remains open.
 
-## Phased Implementation Plan
+## Phase Checklist
 
-- **Phase 0: Config + Regex Surfaces**
-  - Files: `src/termsupervisor/config.py` (defaults), `docs/content-heuristic.md` (already aligned).
-  - Scope: add knobs (`CONTENT_PROMPT_ANCHOR_REGEX`, `CONTENT_INTERACTIVITY_REGEX`, `CONTENT_SPINNER_PATTERNS`, `CONTENT_HEURISTIC_PANE_WHITELIST`, `CONTENT_T_PROMPT_SILENCE`, newline gate/burst thresholds).
-  - Acceptance: configs compile; no behavior change.
-
-- **Phase 1: PromptMonitor Signal Plumb**
-  - Files: `src/termsupervisor/hooks/manager.py`, `src/termsupervisor/hooks/sources/prompt_monitor.py`, `src/termsupervisor/analysis/content_heuristic.py` (input structs), `src/termsupervisor/pane/types.py`.
-  - Scope: expose per-pane `integration_active` and `last_prompt_event_at` to the analyzer; typing only.
-  - Acceptance: analyzer can read prompt status; existing behavior intact.
-
-- **Phase 2: PaneChange Feed Enrichment**
-  - Files: `src/termsupervisor/analysis/change_queue.py`, `src/termsupervisor/analysis/content_heuristic.py`.
-  - Scope: add newline counts and burst length to PaneChange payloads; keep cleaned tail/hash; maintain O(1) per update.
-  - Acceptance: metadata present; regression tests (if any) still pass.
-
-- **Phase 3: Content Heuristic Analyzer (Tiered Gate)**
-  - Files: `src/termsupervisor/analysis/content_heuristic.py`, `src/termsupervisor/runtime/bootstrap.py`.
-  - Scope: implement activation gate (whitelist + prompt silence), debounce, idle re-emit, regex checks; emit events via HookManager.
-  - Acceptance: unit tests cover run/done/idle/wait, debounce, prompt-silence gating.
-
-- **Phase 4: State Machine Wiring**
-  - Files: `src/termsupervisor/pane/transitions.py`, `src/termsupervisor/pane/state_machine.py` (if needed), `tests/`.
-  - Scope: add heuristic_* transitions; ensure WAITING fallbacks reuse existing timers; preserve started_at rules.
-  - Acceptance: transition tests pass; no regressions for existing signals.
-
-- **Phase 5: Integration-Lite Validation**
-  - Files: `tests/analysis/test_content_heuristic.py` (or similar), fixtures under `tests/fixtures/`.
-  - Scope: Gemini/Codex transcripts (REPL prompts, press-enter/menu, streaming, Markdown question flicker) to validate gates and outputs.
-  - Acceptance: tests green; logs show reason strings where expected.
-
-- **Phase 6: Optional UI/Telemetry Surfacing**
-  - Files: `src/termsupervisor/telemetry.py`, `templates/index.html`, `src/termsupervisor/web/app.py`.
-  - Scope: expose counters/reasons; optional dashboard badge for heuristic clears.
-  - Acceptance: non-blocking; only if needed.
+- [x] Phase 0: Config + regex surfaces
+- [x] Phase 1: PromptMonitor status plumbed to analyzer
+- [x] Phase 2: Newline/burst enrichment on PaneChangeQueue
+- [x] Phase 3: Tiered analyzer with debounce/idle re-emit + regex checks
+- [x] Phase 4: Heuristic transitions wired with WAITING fallbacks
+- [x] Phase 5: Integration-lite validation in tests
+- [x] Phase 6: Stage 2 keyword transitions (interrupt/approval)
+- [ ] Phase 7 (optional): UI/telemetry surfacing of heuristic counters/reasons
 
 ### Style/Modularity Notes
 
@@ -127,21 +101,14 @@ Common suppressions: respect `CONTENT_NEGATIVE_PATTERNS` (e.g., spinners ending 
 - Keep helpers small (`_matches_prompt_anchor`, `_is_interactivity_tail`); add brief comments only for non-obvious gates (prompt silence, newline gate).
 - Maintain type hints and ASCII; preserve existing architecture boundaries (analysis module emits to HookManager, not directly to state machine).
 
-## Further Optimization Plan (iTerm2 Variables Integration)
+## JobName Integration (current status + follow-ups)
 
-Context: iTerm2 exposes per-session variables (`jobName`, `jobPid`, `commandLine`, `pid`, `tty`). We currently gate heuristics by pane title; jobName would give precise foreground process IDs (gemini/codex/python REPL).
-
-- **Data capture**: Extend layout traversal/client to fetch `jobName`, `jobPid`, and `commandLine` for each session on every poll; store alongside pane_id. Keep optional to avoid failures on missing variables.
-- **Heuristic gate**: Prefer `jobName` (lowercased) for whitelist matching; fall back to pane title. Allow combined match: title OR jobName in `CONTENT_HEURISTIC_PANE_WHITELIST`.
-- **State cache**: Add jobName/commandLine to `PaneHistory` (or a sidecar map) so analyzer always sees the latest foreground process without waiting for title changes.
-- **Content context**: Attach `jobName`/`commandLine` to emitted heuristic events (metadata) for debugging/telemetry and potential dashboard display (why this pane cleared).
-- **Change detection**: Track jobName changes as a signal; when jobName flips from non-whitelisted → whitelisted, force a heuristic gate re-evaluation; when it leaves the whitelist, consider pausing heuristics for that pane.
-- **Safety**: Cap commandLine length; redact obvious secrets (token-like patterns); do not log full command lines in debug unless masked.
-- **Testing**: Add fixture/mocks for sessions with jobName transitions (zsh → python → gemini) to ensure gates follow foreground process changes; confirm heuristics engage when prompt-silent and jobName hits the whitelist.
+- Status: jobName/jobPid/commandLine/tty are fetched every poll via `ITerm2Client.get_session_job_metadata`; `_passes_whitelist` prefers jobName when present; `PaneHistory` stores redacted command lines for analyzer metrics.
+- Follow-ups: treat jobName flips as gate triggers (pause/resume heuristics when leaving/entering whitelist); optionally surface jobName/commandLine metadata in telemetry/dashboard; keep redaction guardrails for any logging/UI.
 
 ## API Implementation Reference
 
-To implement the data capture described above, use the `async_get_variable` API on the `iterm2.Session` object.
+`async_get_variable` is already used in code to fetch job metadata; snippet retained for convenience.
 
 ### Required Variables
 
@@ -182,31 +149,66 @@ async def get_session_context(session: iterm2.Session) -> dict:
         return {}
 ```
 
-## Execution Plan (jobName-based Gating Upgrade)
+## Future Heuristic Extensions
 
-Goal: switch heuristic activation from pane title matching to foreground process variables (`jobName`/`jobPid`/`commandLine`) provided by iTerm2 Shell Integration, while keeping title as a fallback.
+To reduce misclassification for AI/CLI tools, layer these stateful patterns:
 
-1) Variable Capture
-- Files: `src/termsupervisor/iterm/layout.py` (or a dedicated helper), `src/termsupervisor/iterm/client.py`.
-- Fetch per-session vars every poll via `async_get_variable`: `jobName` (primary), `jobPid`, `commandLine` (redact when logging), `tty`.
-- Use `asyncio.gather(..., return_exceptions=True)`; treat missing vars as empty; cast `jobPid` to int when possible.
+- **Interrupt prompt disappearance (Codex)**: track `"esc to interrupt"` presence; only emit DONE when it disappears *and* quiet ≥ `T_quiet_done` (or no new output for a short window) to avoid early flips when the line scrolls off-screen.
+- **Interrupt-driven start/stop sequencing**: treat presence of `"esc to interrupt"` as RUNNING even without newline/burst; store `interrupt_seen_at` and only allow DONE after disappearance + quiet window or prompt anchor appears.
+- **Spinner → prompt flip**: if a spinner is active and a prompt anchor appears within `T_quiet_done`, emit DONE even if quiet is short (prompt wins over spinner).
+- **Keepalive plateau**: for steady spinner/ellipsis keepalives, if only spinner tokens arrive for > `T_stall`, emit WAITING instead of staying RUNNING; clear on any non-spinner line.
+- **Markdown question flicker guard**: require interactivity matches (`?`, `:`) to persist for ≥ `T_quiet_wait`; ignore single-frame matches if new output arrives within 0.5s.
+- **Foreground process flips**: when `jobName` changes from whitelisted to non-whitelisted mid-stream, pause heuristics until the next prompt-silence window to avoid cross-process state leaks.
+- **Approval prompts (Codex/Gemini/LLMs)**: detect `"1. Yes"` (configurable; allow variants like `"1. Yes, allow once"` via pattern list) as WAITING_APPROVAL; auto-clear on next `content.update` or prompt anchor, mirroring existing WAITING fallbacks.
 
-2) Propagate to Runtime State
-- Files: `src/termsupervisor/iterm/models.py`, `src/termsupervisor/supervisor.py`, `src/termsupervisor/analysis/change_queue.py` (if storing alongside content), `src/termsupervisor/pane/types.py` (pane metadata), `src/termsupervisor/analysis/content_heuristic.py`.
-- Add `job_name` (and optionally `command_line`, `job_pid`) to pane metadata cached in `PaneHistory` (or a sidecar map) and pass to the analyzer each poll. Keep pane title as fallback.
+## Stage 2: Stateful Keyword Transitions (Shipped)
 
-3) Gate Logic Update
-- Files: `src/termsupervisor/analysis/content_heuristic.py`, `src/termsupervisor/config.py`.
-- Update `_passes_whitelist` to prefer `jobName` (lowercased) when present; fallback to pane title. Consider adding an optional `CONTENT_HEURISTIC_JOB_WHITELIST` (defaults to the same set) and a toggle to require jobName when available.
+Status: **shipped**. Interrupt/approval keywords drive transitions only on appearance/disappearance, not continuous presence.
 
-4) Event/Telemetry Context
-- Files: `src/termsupervisor/analysis/content_heuristic.py`, `src/termsupervisor/telemetry.py`.
-- Attach `jobName` (and redacted `commandLine`) to emitted heuristic events/metrics for debugging; avoid logging full command lines.
+### Configuration
 
-5) Tests
-- Files: `tests/analysis/test_content_heuristic.py` (or new fixtures), possibly `tests/fixtures/`.
-- Add cases for jobName transitions (zsh → python → gemini) and verify gate opens when jobName hits whitelist even if title is generic; ensure fallback works when jobName is missing; confirm safety (no crashes on missing variables).
+- `CONTENT_INTERRUPT_PATTERNS`: `["esc to interrupt", "esc to cancel", "press esc to stop"]`
+- `CONTENT_APPROVAL_PATTERNS`: `["1\\. Yes", "1\\. Yes, allow", "[Y]es"]`
+- `CONTENT_T_INTERRUPT_DONE`: defaults to `CONTENT_T_QUIET_DONE`
 
-6) Optional Dashboard Surfacing
-- Files: `templates/index.html`, `src/termsupervisor/web/app.py`.
-- Optionally display current `jobName`/`commandLine` (redacted) in pane tooltips or debug overlay to aid users in understanding heuristic decisions.
+### Per-Pane State (`HeuristicPaneState`)
+
+- `interrupt_seen_at`: timestamp when interrupt pattern first appeared.
+- `interrupt_present`: whether interrupt is currently visible.
+- `approval_seen_at`: timestamp when approval pattern first appeared.
+- `approval_present`: whether approval is currently visible.
+
+### Transition Rules
+
+- **Interrupt appear** (not previously seen) → emit `heuristic_run` once (even without newline/burst).
+- **Interrupt disappear** (was seen, now absent) → emit `heuristic_done` only if quiet ≥ `T_quiet_done` **or** prompt/completion anchor present.
+- **Approval appear** (not previously seen) → emit `heuristic_wait` once.
+- **Approval clear** → auto-clear on next `content.update` or prompt anchor (reuses WAITING fallbacks).
+- Seen flags prevent re-emission while keyword persists; scroll-off without quiet does not trigger DONE.
+
+### Signal Priority (RUNNING/LONG_RUNNING)
+
+Evaluation order (first match wins):
+1. DONE: prompt anchor or completion token (highest priority).
+2. DONE: interrupt disappeared **and** (quiet ≥ `T_quiet_done` **or** prompt/completion anchor).
+3. WAITING: approval keyword first appearance.
+4. WAITING: spinner/interactivity tail with quiet ≥ `T_quiet_wait`.
+5. IDLE: quiet ≥ `T_quiet_idle` + stable hash with no anchors/spinners/interactivity.
+
+### Global Guards
+
+- Negative patterns suppress all signals early.
+- Per-signal debounce blocks rapid repeats.
+- DONE/FAILED set `suppressed_until_reactivation`; no further heuristic signals until `heuristic_run`.
+- Reactivation: `heuristic_run` fires on newline/burst **or** first appearance of interrupt keyword.
+- Interrupt state cleared on DONE emission.
+
+### Test Coverage
+
+Tests in `tests/analysis/test_content_heuristic.py`:
+- `TestInterruptPatterns`, `TestApprovalPatterns`: pattern matching.
+- `TestInterruptAppearance`: RUNNING trigger without newline gate.
+- `TestInterruptDisappearance`: DONE requires quiet or anchor; scroll-off without quiet does not DONE.
+- `TestApprovalAppearance`: WAITING trigger; persistence no re-emit.
+- `TestStage2Priority`: prompt anchor beats interrupt-based DONE; approval beats spinner.
+- `TestStage2StateTracking`: per-pane isolation; state cleared on DONE.
