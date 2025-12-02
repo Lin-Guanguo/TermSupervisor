@@ -163,7 +163,7 @@ To reduce misclassification for AI/CLI tools, layer these stateful patterns:
 
 ## Stage 2: Stateful Keyword Transitions (Shipped)
 
-Status: **shipped**. Interrupt/approval keywords drive transitions only on appearance/disappearance, not continuous presence.
+Status: **shipped** (initial implementation). Note: heuristics are still rough in practice; a follow-up refactor is planned to improve reliability/usability.
 
 ### Configuration
 

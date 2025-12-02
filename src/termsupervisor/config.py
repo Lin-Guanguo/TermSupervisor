@@ -76,7 +76,7 @@ METRICS_ENABLED = True  # 是否启用指标收集
 
 # === 内容启发式配置 ===
 # Feature toggle
-CONTENT_HEURISTIC_ENABLED = True  # Master switch for content heuristics
+CONTENT_HEURISTIC_ENABLED = False  # Master switch for content heuristics
 
 # Pane whitelist (only run heuristics for these process/title patterns)
 CONTENT_HEURISTIC_PANE_WHITELIST = {"gemini", "codex", "copilot"}

@@ -398,6 +398,11 @@ class ContentHeuristicAnalyzer:
                 reason="approval_appeared"
             )
 
+        # If interrupt keyword is still present, task is actively running - skip WAIT/IDLE
+        # "esc to interrupt" means the process is still executing, not waiting for input
+        if state.interrupt_present:
+            return HeuristicResult(reason="interrupt_active")
+
         # === Priority 4: heuristic_wait via spinner or interactivity ===
         if quiet_duration >= config.CONTENT_T_QUIET_WAIT:
             if self._matches_spinner(last_line) or self._matches_interactivity(last_line):
