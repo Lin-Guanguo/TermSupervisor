@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, List
 
 if TYPE_CHECKING:
     from ..pane import TaskStatus
+    from ..iterm.client import JobMetadata
 
 
 @dataclass
@@ -42,10 +43,8 @@ class PaneHistory:
     is_thinking: bool = False
     thinking_since: datetime | None = None
 
-    # Heuristic job metadata (for whitelist matching)
-    job_name: str = ""
-    job_pid: int | None = None
-    command_line: str = ""  # Redacted for logging
+    # Job metadata (for whitelist matching and tooltip display)
+    job: "JobMetadata | None" = None
 
     def add_change(self, change: PaneChange) -> None:
         """添加变化记录"""

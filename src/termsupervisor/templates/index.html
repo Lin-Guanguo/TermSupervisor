@@ -1097,6 +1097,40 @@
                 font-size: 12px;
             }
         }
+
+        /* Pane hover tooltip */
+        .pane-tooltip {
+            position: fixed;
+            background: #21262d;
+            border: 1px solid #484f58;
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 12px;
+            color: #e6edf3;
+            z-index: 5000;
+            pointer-events: none;
+            display: none;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            max-width: 400px;
+            word-break: break-all;
+        }
+        .pane-tooltip.show {
+            display: block;
+        }
+        .pane-tooltip-row {
+            display: flex;
+            gap: 8px;
+            line-height: 1.6;
+        }
+        .pane-tooltip-label {
+            color: #8b949e;
+            flex-shrink: 0;
+        }
+        .pane-tooltip-value {
+            color: #e6edf3;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
     </style>
 </head>
 <body>
@@ -1120,6 +1154,18 @@
 
     <!-- Copy toast -->
     <div class="copy-toast" id="copyToast">Copied!</div>
+
+    <!-- Pane hover tooltip -->
+    <div class="pane-tooltip" id="paneTooltip">
+        <div class="pane-tooltip-row">
+            <span class="pane-tooltip-label">Path:</span>
+            <span class="pane-tooltip-value" id="tooltipPath">-</span>
+        </div>
+        <div class="pane-tooltip-row">
+            <span class="pane-tooltip-label">Process:</span>
+            <span class="pane-tooltip-value" id="tooltipProcess">-</span>
+        </div>
+    </div>
 
     <!-- 右键菜单 -->
     <div class="context-menu" id="contextMenu">
@@ -1224,6 +1270,46 @@
             copyToastTimeout = setTimeout(() => {
                 copyToast.classList.remove('show');
             }, 1500);
+        }
+
+        // Pane hover tooltip
+        const paneTooltip = document.getElementById('paneTooltip');
+        const tooltipPath = document.getElementById('tooltipPath');
+        const tooltipProcess = document.getElementById('tooltipProcess');
+        let tooltipTimeout = null;
+
+        function showPaneTooltip(sessionId, e) {
+            const statuses = currentLayout.pane_statuses || {};
+            const status = statuses[sessionId] || {};
+            const path = status.path || '-';
+            const jobName = status.job_name || '-';
+
+            tooltipPath.textContent = path;
+            tooltipProcess.textContent = jobName;
+
+            updateTooltipPosition(e);
+            paneTooltip.classList.add('show');
+        }
+
+        function updateTooltipPosition(e) {
+            const offset = 12;
+            let x = e.clientX + offset;
+            let y = e.clientY + offset;
+
+            // Prevent tooltip from going off-screen
+            const rect = paneTooltip.getBoundingClientRect();
+            const maxX = window.innerWidth - rect.width - 10;
+            const maxY = window.innerHeight - rect.height - 10;
+
+            if (x > maxX) x = e.clientX - rect.width - offset;
+            if (y > maxY) y = e.clientY - rect.height - offset;
+
+            paneTooltip.style.left = x + 'px';
+            paneTooltip.style.top = y + 'px';
+        }
+
+        function hidePaneTooltip() {
+            paneTooltip.classList.remove('show');
         }
 
         // 通知面板系统
@@ -1946,9 +2032,6 @@
             svgContainer.appendChild(svgObject);
             paneEl.appendChild(svgContainer);
 
-            const debugInfo = `Raw: ${Math.round(paneData.x)},${Math.round(paneData.y)} ${Math.round(paneData.width)}x${Math.round(paneData.height)}\nCalc: ${left.toFixed(1)}%, ${top.toFixed(1)}%`;
-            paneEl.title = `[${paneData.index}] ${paneData.session_id}\n${debugInfo}`;
-
             paneEl.onclick = () => {
                 // 发送激活请求，后端会处理状态清除
                 ws.send(JSON.stringify({action: 'activate', session_id: paneData.session_id}));
@@ -1959,6 +2042,11 @@
                 copyToClipboard(sessionId, `Copied: ${sessionId.substring(0, 8)}...`);
             };
             paneEl.oncontextmenu = (e) => showContextMenu(e, 'session', paneData.session_id, paneData.name);
+
+            // Hover tooltip
+            paneEl.onmouseenter = (e) => showPaneTooltip(paneData.session_id, e);
+            paneEl.onmousemove = (e) => updateTooltipPosition(e);
+            paneEl.onmouseleave = () => hidePaneTooltip();
 
             return paneEl;
         }

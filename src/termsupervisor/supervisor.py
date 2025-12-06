@@ -3,6 +3,7 @@
 import asyncio
 import difflib
 import logging
+import os
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -211,10 +212,8 @@ class TermSupervisor:
                     history = self._get_or_create_history(pane.session_id, pane.name)
                     # Refresh pane_name every poll (user may rename pane/tab)
                     history.pane_name = pane.name
-                    # Update job metadata for whitelist matching
-                    history.job_name = job_metadata.job_name
-                    history.job_pid = job_metadata.job_pid
-                    history.command_line = job_metadata.redacted_command_line()
+                    # Update job metadata for whitelist matching and tooltip display
+                    history.job = job_metadata
                     panes_to_analyze.append(history)
 
                     if pane.session_id in self.snapshots:
@@ -296,6 +295,7 @@ class TermSupervisor:
             prompt_status = self._shell_source.get_prompt_monitor_status(pane_id)
 
             # Run heuristic analysis with both job_name and pane_title
+            job = history.job
             await self._heuristic_analyzer.process_and_emit(
                 pane_id=pane_id,
                 pane_title=history.pane_name,
@@ -303,8 +303,8 @@ class TermSupervisor:
                 current_source=state.source,
                 prompt_status=prompt_status,
                 queue=queue,
-                job_name=history.job_name,
-                command_line=history.command_line,
+                job_name=job.job_name if job else "",
+                command_line=job.redacted_command_line() if job else "",
             )
 
     def _log_update(self, now: datetime, pane, changed_lines: list[str]):
@@ -392,8 +392,18 @@ class TermSupervisor:
             return ("Window", "Tab", pane_name or "Pane")
         return ("Window", "Tab", "Pane")
 
+    @staticmethod
+    def _shorten_path(path: str) -> str:
+        """Replace home directory prefix with ~"""
+        if not path:
+            return ""
+        home = os.path.expanduser("~")
+        if path.startswith(home):
+            return "~" + path[len(home):]
+        return path
+
     def get_layout_dict(self) -> dict:
-        """获取布局数据字典（包含状态信息）"""
+        """获取布局数据字典（包含状态信息和 job metadata）"""
         data = self.layout.to_dict()
 
         # 从 HookManager 获取状态信息
@@ -406,6 +416,9 @@ class TermSupervisor:
                 for pane in tab.panes:
                     session_id = pane.session_id
                     state = hook_manager.get_state(session_id)
+                    history = self.pane_histories.get(session_id)
+                    job = history.job if history else None
+                    path = self._shorten_path(job.path) if job else ""
 
                     if state:
                         status = state.status
@@ -417,6 +430,9 @@ class TermSupervisor:
                             "needs_notification": status.needs_notification,
                             "needs_attention": status.needs_attention,
                             "display": status.display,
+                            # Job metadata for tooltip
+                            "job_name": job.job_name if job else "",
+                            "path": path,
                         }
                     else:
                         # Pane 尚未被 HookManager 跟踪，使用默认 IDLE 状态
@@ -428,6 +444,9 @@ class TermSupervisor:
                             "needs_notification": False,
                             "needs_attention": False,
                             "display": "",
+                            # Job metadata for tooltip
+                            "job_name": job.job_name if job else "",
+                            "path": path,
                         }
 
         data["pane_statuses"] = pane_statuses

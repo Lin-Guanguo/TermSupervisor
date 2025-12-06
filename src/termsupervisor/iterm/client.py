@@ -35,6 +35,7 @@ class JobMetadata:
     job_pid: int | None = None
     command_line: str = ""  # Redacted for logging
     tty: str = ""
+    path: str = ""  # Current working directory
 
     def redacted_command_line(self) -> str:
         """Return truncated and token-masked command line for safe logging"""
@@ -219,14 +220,16 @@ class ITerm2Client:
                 session.async_get_variable("jobPid"),
                 session.async_get_variable("commandLine"),
                 session.async_get_variable("tty"),
+                session.async_get_variable("path"),
                 return_exceptions=True
             )
-            job_name, job_pid, cmd_line, tty = results
+            job_name, job_pid, cmd_line, tty, path = results
 
             # Sanitize results
             job_name_str = job_name if isinstance(job_name, str) else ""
             tty_str = tty if isinstance(tty, str) else ""
             cmd_line_str = cmd_line if isinstance(cmd_line, str) else ""
+            path_str = path if isinstance(path, str) else ""
 
             # Cast jobPid to int
             job_pid_int: int | None = None
@@ -239,7 +242,8 @@ class ITerm2Client:
                 job_name=job_name_str,
                 job_pid=job_pid_int,
                 command_line=cmd_line_str,
-                tty=tty_str
+                tty=tty_str,
+                path=path_str
             )
         except Exception:
             return JobMetadata()

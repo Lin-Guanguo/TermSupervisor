@@ -23,6 +23,8 @@ Prereqs: Enable iTerm2 Python API; Python 3.12+ via uv.
 | `make viewlog` | View `server.log`. |
 | `make taillog` | Follow log. |
 | `make test` | Run pytest. |
+| `make debug-states` | List all pane debug snapshots. |
+| `make debug-state ID=<pane_id>` | View single pane state/queue details. |
 | `uv sync` | Install deps. |
 
 Dashboard: http://localhost:8765
@@ -43,7 +45,6 @@ src/termsupervisor/
 │   ├── transitions.py      # Rule table (WAITING→RUNNING fallback, etc.)
 │   ├── pane.py             # Display layer (delay, notification suppression)
 │   ├── queue.py            # ActorQueue with generation/backpressure
-│   ├── persistence.py      # Versioned checksum save/load (v2)
 │   ├── predicates.py
 │   └── types.py
 ├── hooks/
@@ -135,5 +136,5 @@ Signal format: `{source}.{event_type}` (e.g., `shell.command_start`, `claude-cod
 - runtime/bootstrap builds the single Timer + HookManager + Sources stack; per-pane ActorQueue + generation gating are active.
 - WebSocket handler is JSON-only (`activate/rename/create_tab`); status changes broadcast from HookManager callback.
 - `supervisor.py` still uses PaneChangeQueue for content throttle; a dedicated content hook source is still pending.
-- Persistence (v2, checksum) is implemented but not auto-wired; restart resets state/history unless save/load is called.
+- State is in-memory only; restart resets all state/history.
 - Telemetry metrics are in-memory only; no Prometheus/StatsD sink yet.
