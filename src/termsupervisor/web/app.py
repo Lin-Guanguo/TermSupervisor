@@ -49,9 +49,6 @@ async def setup_hook_system(server: WebServer, connection: iterm2.Connection) ->
     async def on_status_change(pane_id: str, status, reason: str, source: str, suppressed: bool):
         """状态变更时广播到前端"""
         window_name, tab_name, pane_name = server.supervisor.get_pane_location(pane_id)
-        print(
-            f"[HookStatus] pane_id={pane_id}, window={window_name}, tab={tab_name}, pane={pane_name}"
-        )
 
         needs_notification = status.needs_notification and not suppressed
 

@@ -58,7 +58,7 @@ RECENTLY_FINISHED_HINT_SECONDS = 10.0  # "recently finished" 提示持续时间�
 QUIET_COMPLETION_THRESHOLD_SECONDS = 3.0  # 静默完成阈值（秒），短于此不闪烁
 
 # === Focus 防抖配置 ===
-FOCUS_DEBOUNCE_SECONDS = 2.0  # iTerm2 focus 防抖时间
+FOCUS_DEBOUNCE_SECONDS = 0.3  # iTerm2 focus 防抖时间
 
 # === 内容渲染配置 ===
 QUEUE_REFRESH_LINES = 5  # 中等变化阈值，触发页面刷新

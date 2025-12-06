@@ -124,13 +124,23 @@ class HookManager:
     ) -> None:
         """内部显示变化回调"""
         if self._on_change:
-            self._on_change(
+            import asyncio
+
+            coro = self._on_change(
                 pane_id,
                 display_state.status,
                 display_state.description,
                 display_state.source,
                 suppressed,
             )
+            # 如果回调是 async 函数，需要创建任务来执行
+            if asyncio.iscoroutine(coro):
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(coro)
+                except RuntimeError:
+                    # 没有运行的事件循环，直接运行
+                    asyncio.run(coro)
 
     # === 事件处理 ===
 
