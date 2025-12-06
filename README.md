@@ -8,10 +8,12 @@ Monitor iTerm2 pane content changes with a real-time web dashboard.
 ## Features
 
 - **Real-time dashboard**: Mirrors the full iTerm2 layout with SVG rendering and per-pane status overlays.
-- **Layout controls**: Adjustable tabs-per-row (1–6), hidden-tab dropdowns, context menu rename/hide, and inline “+ Tab” with layout presets.
+- **Layout controls**: Adjustable tabs-per-row (1–6) via settings drawer, hidden-tab dropdowns, context menu rename/hide, and inline "+ Tab" with layout presets.
+- **Interactive panes**: Click to activate in iTerm2, double-click to copy session ID, hover for path/process tooltip, focus badge indicator.
 - **State pipeline**: HookManager → StateManager (per-pane ActorQueue) → PaneStateMachine → Pane display (delay + notification suppression) with Timer driving LONG_RUNNING and delayed clears.
 - **Content change detection**: 1s polling → ContentCleaner → PaneChangeQueue throttling; refresh on ≥5 changed lines or 10s timeout and emit `content.changed` for WAITING→RUNNING fallback.
-- **Notifications**: Floating panel with status colors; focus-aware suppression for <3s tasks or focused panes.
+- **Notifications**: Floating panel with status colors; focus-aware suppression for <3s tasks or focused panes; auto-dismiss 60s after pane becomes IDLE.
+- **Debug panel**: Real-time state machine monitoring via WebSocket subscription.
 
 ## Architecture
 
@@ -41,7 +43,7 @@ Signal Sources (shell | claude-code | iterm focus | frontend click | timer.check
 
 - `runtime/bootstrap.py` creates a single Timer + HookManager + Sources/Receiver; Timer ticks every 1s for LONG_RUNNING and Pane delay tasks.
 - Layout/content path: `TermSupervisor` polls iTerm2 → ContentCleaner → PaneChangeQueue (≥5 lines or 10s) → layout snapshot + `content.changed` to HookManager; WebServer pushes layout + pane statuses via WebSocket.
-- Hook sources: Shell PromptMonitor, Claude Code HTTP hook, iTerm focus debounce (2s); frontend actions use JSON messages on `/ws`.
+- Hook sources: Shell PromptMonitor, Claude Code HTTP hook, iTerm focus debounce (0.3s); frontend actions use JSON messages on `/ws`.
 
 ### State Machine
 
@@ -90,7 +92,8 @@ src/termsupervisor/
 │   ├── receiver.py         # HTTP /api/hook endpoint
 │   └── sources/            # Shell, Claude Code, iTerm focus debounce, PromptMonitor
 │       └── prompt_monitor.py   # iTerm2 PromptMonitor wrapper
-├── analysis/               # ContentCleaner + change_queue (content throttle DTOs)
+├── analysis/               # ContentCleaner + change_queue + heuristic detectors
+│   └── heuristic.py        # Keyword-gated content pattern detection
 │   └── change_queue.py     # PaneChangeQueue, PaneHistory, PaneChange, ChangeRecord
 ├── iterm/                  # Layout traversal + client helpers + layout models
 │   └── models.py           # LayoutData, WindowInfo, TabInfo, PaneInfo, PaneSnapshot
@@ -181,7 +184,7 @@ LONG_RUNNING_THRESHOLD_SECONDS = 60.0
 STATE_HISTORY_MAX_LENGTH = 30
 DISPLAY_DELAY_SECONDS = 5.0
 NOTIFICATION_MIN_DURATION_SECONDS = 3.0
-FOCUS_DEBOUNCE_SECONDS = 2.0
+FOCUS_DEBOUNCE_SECONDS = 0.3
 
 # === PaneChangeQueue ===
 QUEUE_REFRESH_LINES = 5
@@ -193,6 +196,13 @@ LOG_LEVEL = os.environ.get("TERMSUPERVISOR_LOG_LEVEL", "INFO")
 LOG_MAX_CMD_LEN = 120
 MASK_COMMANDS = False
 METRICS_ENABLED = True
+
+# === Content Heuristic (opt-in) ===
+CONTENT_HEURISTIC_KEYWORD = ""       # Entry keyword to enable (e.g., "claude-code")
+CONTENT_HEURISTIC_EXIT_KEYWORD = ""  # Optional exit keyword
+CONTENT_HEURISTIC_EXIT_TIMEOUT_SECONDS = 0  # Exit timeout (0 = disabled)
+CONTENT_HEURISTIC_COOLDOWN_SECONDS = 2.0    # Pattern cooldown
+CONTENT_HEURISTIC_MAX_SCAN_LINES = 200      # Resource guard
 ```
 
 ## Claude Code Integration

@@ -1403,7 +1403,9 @@
         const notificationCount = document.getElementById('notificationCount');
         const notificationClear = document.getElementById('notificationClear');
         const NOTIFICATION_FADE_DURATION = 300;
-        let notifications = []; // 存储所有通知
+        const NOTIFICATION_AUTO_DISMISS_MS = 60 * 1000;  // 状态变为 IDLE 后，通知自动消失时间（毫秒）
+        const NOTIFICATION_AUTO_DISMISS_CHECK_INTERVAL = 1000;  // 轮询检查间隔（毫秒）
+        let notifications = []; // 存储所有通知，每个 notification 可有 autoDismissAt 字段
 
         // 从 localStorage 恢复面板折叠状态
         const savedPanelCollapsed = localStorage.getItem('notificationPanelCollapsed');
@@ -1526,6 +1528,26 @@
             notifications = [];
             renderNotifications();
         }
+
+        // 为指定 session 的所有通知设置自动消失时间
+        function scheduleAutoDismissForSession(sessionId) {
+            const dismissAt = Date.now() + NOTIFICATION_AUTO_DISMISS_MS;
+            notifications.forEach(n => {
+                if (n.sessionId === sessionId && !n.autoDismissAt) {
+                    n.autoDismissAt = dismissAt;
+                }
+            });
+        }
+
+        // 轮询检查并清除到期的通知
+        function checkAutoDismissNotifications() {
+            const now = Date.now();
+            const toRemove = notifications.filter(n => n.autoDismissAt && n.autoDismissAt <= now);
+            toRemove.forEach(n => removeNotification(n.id));
+        }
+
+        // 启动自动清除轮询
+        setInterval(checkAutoDismissNotifications, NOTIFICATION_AUTO_DISMISS_CHECK_INTERVAL);
 
         function formatTime(date) {
             const now = new Date();
@@ -1833,6 +1855,12 @@
                 const title = `[${tab_name || 'Tab'}][${source}]`;
                 showToast(status, title, reason, normalizedPaneId);
             }
+
+            // 状态变为 IDLE 时，为该 session 的所有通知设置自动消失
+            if (prevStatus !== status && status === 'idle') {
+                scheduleAutoDismissForSession(normalizedPaneId);
+            }
+
             previousStatuses[normalizedPaneId] = status;
 
             // 重新渲染以更新 UI
