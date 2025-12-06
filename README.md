@@ -1,9 +1,12 @@
 # TermSupervisor
 
-Monitor iTerm2 pane content changes with a real-time web dashboard.
+A real-time web dashboard that monitors all your iTerm2 panes. See terminal states at a glance—running, waiting for approval, done, or failed—without switching windows. Built for developers running multiple AI agents (like Claude Code) in parallel.
 
-![TermSupervisor + iTerm2](docs/image.jpg)
-*Left: iTerm2 with multiple panes | Right: TermSupervisor dashboard mirroring the layout in real-time*
+![TermSupervisor](docs/image3.jpeg)
+
+| With iTerm2 | Standalone |
+|:---:|:---:|
+| ![Combo](docs/image.jpg) | ![Dashboard](docs/image2.jpg) |
 
 ## Features
 
