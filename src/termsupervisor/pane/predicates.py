@@ -12,9 +12,7 @@
 - require_source_match(): 检查事件源与当前状态源是否一致
 """
 
-from typing import Callable
-
-from .types import HookEvent, StateSnapshot, TaskStatus, Predicate
+from .types import HookEvent, Predicate, StateSnapshot, TaskStatus
 
 
 def require_exit_code(code: int) -> Predicate:
@@ -26,6 +24,7 @@ def require_exit_code(code: int) -> Predicate:
     Returns:
         谓词函数
     """
+
     def predicate(event: HookEvent, snapshot: StateSnapshot) -> bool:
         return event.data.get("exit_code") == code
 
@@ -38,6 +37,7 @@ def require_exit_code_nonzero() -> Predicate:
     Returns:
         谓词函数
     """
+
     def predicate(event: HookEvent, snapshot: StateSnapshot) -> bool:
         exit_code = event.data.get("exit_code")
         return exit_code is not None and exit_code != 0
@@ -53,6 +53,7 @@ def require_same_generation() -> Predicate:
     Returns:
         谓词函数
     """
+
     def predicate(event: HookEvent, snapshot: StateSnapshot) -> bool:
         return event.pane_generation >= snapshot.pane_generation
 
@@ -68,6 +69,7 @@ def require_status_in(statuses: set[TaskStatus]) -> Predicate:
     Returns:
         谓词函数
     """
+
     def predicate(event: HookEvent, snapshot: StateSnapshot) -> bool:
         return snapshot.status in statuses
 
@@ -85,6 +87,7 @@ def require_running_duration_gt(seconds: float) -> Predicate:
     Returns:
         谓词函数
     """
+
     def predicate(event: HookEvent, snapshot: StateSnapshot) -> bool:
         if snapshot.started_at is None:
             return False
@@ -105,6 +108,7 @@ def require_state_id_at_least(n: int) -> Predicate:
     Returns:
         谓词函数
     """
+
     def predicate(event: HookEvent, snapshot: StateSnapshot) -> bool:
         return snapshot.state_id >= n
 
@@ -119,6 +123,7 @@ def require_source_match() -> Predicate:
     Returns:
         谓词函数
     """
+
     def predicate(event: HookEvent, snapshot: StateSnapshot) -> bool:
         return event.source == snapshot.source
 
@@ -127,6 +132,7 @@ def require_source_match() -> Predicate:
 
 def always_true() -> Predicate:
     """总是返回 True 的谓词（用于测试）"""
+
     def predicate(event: HookEvent, snapshot: StateSnapshot) -> bool:
         return True
 
@@ -135,6 +141,7 @@ def always_true() -> Predicate:
 
 def always_false() -> Predicate:
     """总是返回 False 的谓词（用于测试）"""
+
     def predicate(event: HookEvent, snapshot: StateSnapshot) -> bool:
         return False
 
@@ -150,6 +157,7 @@ def reject_same_source_in_long_running() -> Predicate:
     Returns:
         谓词函数
     """
+
     def predicate(event: HookEvent, snapshot: StateSnapshot) -> bool:
         # 如果不是 LONG_RUNNING，允许
         if snapshot.status != TaskStatus.LONG_RUNNING:

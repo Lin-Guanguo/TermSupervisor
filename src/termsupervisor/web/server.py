@@ -3,15 +3,15 @@
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 
-from termsupervisor.iterm.models import LayoutData
 from termsupervisor.iterm import ITerm2Client
+from termsupervisor.iterm.models import LayoutData
+from termsupervisor.render import TerminalRenderer
 from termsupervisor.supervisor import TermSupervisor
 from termsupervisor.web.handlers import MessageHandler
-from termsupervisor.render import TerminalRenderer
 
 if TYPE_CHECKING:
     from termsupervisor.hooks import HookReceiver
@@ -25,7 +25,7 @@ class WebServer:
         self.supervisor = supervisor
         self.iterm_client = iterm_client
         self.clients: list[WebSocket] = []
-        self._hook_receiver: "HookReceiver | None" = None
+        self._hook_receiver: HookReceiver | None = None
         self._renderer = TerminalRenderer()
         # Debug subscribers (WebSocket clients that want debug events)
         self._debug_subscribers: set[WebSocket] = set()
@@ -58,6 +58,7 @@ class WebServer:
         由于这是同步回调，需要在事件循环中调度广播。
         """
         import asyncio
+
         try:
             loop = asyncio.get_running_loop()
             loop.create_task(self.broadcast_debug_event(event))
@@ -80,23 +81,17 @@ class WebServer:
             session = await self.iterm_client.get_session_by_id(session_id)
             if not session:
                 return Response(
-                    content="Session not found",
-                    status_code=404,
-                    media_type="text/plain"
+                    content="Session not found", status_code=404, media_type="text/plain"
                 )
 
             try:
                 svg = await self._renderer.render_session(session)
                 return Response(
-                    content=svg,
-                    media_type="image/svg+xml",
-                    headers={"Cache-Control": "no-cache"}
+                    content=svg, media_type="image/svg+xml", headers={"Cache-Control": "no-cache"}
                 )
             except Exception as e:
                 return Response(
-                    content=f"Render error: {e}",
-                    status_code=500,
-                    media_type="text/plain"
+                    content=f"Render error: {e}", status_code=500, media_type="text/plain"
                 )
 
         @self.app.get("/api/debug/states")

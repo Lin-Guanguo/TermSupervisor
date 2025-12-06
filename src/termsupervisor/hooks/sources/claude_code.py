@@ -9,11 +9,11 @@
 
 from typing import TYPE_CHECKING
 
-from ..sources.base import HookSource
 from ...telemetry import get_logger
+from ..sources.base import HookSource
 
 if TYPE_CHECKING:
-    from ..manager import HookManager
+    pass
 
 logger = get_logger(__name__)
 
@@ -70,12 +70,7 @@ class ClaudeCodeHookSource(HookSource):
         """停止"""
         logger.info("[ClaudeSrc] stopped")
 
-    async def handle_event(
-        self,
-        pane_id: str,
-        event: str,
-        data: dict | None = None
-    ) -> None:
+    async def handle_event(self, pane_id: str, event: str, data: dict | None = None) -> None:
         """处理 Claude Code 事件
 
         Args:

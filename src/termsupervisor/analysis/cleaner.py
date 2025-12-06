@@ -1,17 +1,13 @@
 """变化清洗器：判断是否值得调用 LLM"""
 
 import difflib
-from datetime import datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .change_queue import PaneHistory, PaneChange
+    from .change_queue import PaneChange, PaneHistory
 
 # 思考符号（Claude Code 等 AI 工具）
-THINKING_SYMBOLS = {
-    '✽', '✳', '✶', '✢', '✻', '·',
-    '⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'
-}
+THINKING_SYMBOLS = {"✽", "✳", "✶", "✢", "✻", "·", "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 
 class ChangeCleaner:
@@ -74,14 +70,14 @@ class ChangeCleaner:
 
         # 检查 diff 中是否只有符号变化
         for line in change.diff_lines:
-            if line.startswith('+') or line.startswith('-'):
+            if line.startswith("+") or line.startswith("-"):
                 content = line[1:].strip()
                 # 如果行内容除了符号外还有实质变化，返回 False
                 has_thinking_symbol = any(sym in content for sym in THINKING_SYMBOLS)
                 has_thinking_keyword = (
-                    'Thinking' in content or
-                    'Contemplating' in content or
-                    'esc to interrupt' in content
+                    "Thinking" in content
+                    or "Contemplating" in content
+                    or "esc to interrupt" in content
                 )
                 if not (has_thinking_symbol or has_thinking_keyword):
                     # 有其他内容变化
@@ -91,9 +87,5 @@ class ChangeCleaner:
 
     def _is_similar(self, prev: "PaneChange", curr: "PaneChange") -> bool:
         """检查两次变化是否太相似"""
-        ratio = difflib.SequenceMatcher(
-            None,
-            prev.diff_summary,
-            curr.diff_summary
-        ).ratio()
+        ratio = difflib.SequenceMatcher(None, prev.diff_summary, curr.diff_summary).ratio()
         return ratio > self.similarity_threshold

@@ -3,14 +3,15 @@
 布局相关的 DTO：Window, Tab, Pane, Layout。
 """
 
-from dataclasses import dataclass, field, asdict
+from collections.abc import Awaitable, Callable
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import Callable, Awaitable
 
 
 @dataclass
 class PaneInfo:
     """Pane 信息"""
+
     session_id: str
     name: str
     index: int
@@ -23,6 +24,7 @@ class PaneInfo:
 @dataclass
 class TabInfo:
     """Tab 信息"""
+
     tab_id: str
     name: str
     panes: list[PaneInfo] = field(default_factory=list)
@@ -31,6 +33,7 @@ class TabInfo:
 @dataclass
 class WindowInfo:
     """Window 信息"""
+
     window_id: str
     name: str
     x: float
@@ -43,6 +46,7 @@ class WindowInfo:
 @dataclass
 class LayoutData:
     """完整布局数据"""
+
     windows: list[WindowInfo] = field(default_factory=list)
     updated_sessions: list[str] = field(default_factory=list)
     active_session_id: str | None = None  # 当前 focus 的 session
@@ -55,6 +59,7 @@ class LayoutData:
 @dataclass
 class PaneSnapshot:
     """Pane 内容快照"""
+
     session_id: str
     index: int
     content: str

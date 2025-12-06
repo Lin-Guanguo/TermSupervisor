@@ -1,13 +1,12 @@
 """PaneStateMachine 测试"""
 
 import pytest
-from datetime import datetime
 
 from termsupervisor.pane import (
-    TaskStatus,
     HookEvent,
-    StateChange,
     PaneStateMachine,
+    StateChange,
+    TaskStatus,
 )
 from termsupervisor.telemetry import metrics
 
@@ -52,13 +51,15 @@ class TestShellTransitions:
     def test_command_end_success(self, machine):
         """S2: RUNNING → DONE (exit_code=0)"""
         # 先执行命令
-        machine.process(HookEvent(
-            source="shell",
-            pane_id="test-pane-123",
-            event_type="command_start",
-            data={"command": "ls"},
-            pane_generation=1,
-        ))
+        machine.process(
+            HookEvent(
+                source="shell",
+                pane_id="test-pane-123",
+                event_type="command_start",
+                data={"command": "ls"},
+                pane_generation=1,
+            )
+        )
 
         # 命令成功结束
         event = HookEvent(
@@ -77,13 +78,15 @@ class TestShellTransitions:
 
     def test_command_end_failure(self, machine):
         """S3: RUNNING → FAILED (exit_code≠0)"""
-        machine.process(HookEvent(
-            source="shell",
-            pane_id="test-pane-123",
-            event_type="command_start",
-            data={"command": "false"},
-            pane_generation=1,
-        ))
+        machine.process(
+            HookEvent(
+                source="shell",
+                pane_id="test-pane-123",
+                event_type="command_start",
+                data={"command": "false"},
+                pane_generation=1,
+            )
+        )
 
         event = HookEvent(
             source="shell",
@@ -102,12 +105,14 @@ class TestShellTransitions:
     def test_command_end_ignored_when_not_shell_source(self, machine):
         """shell.command_end 只处理 shell source 的 RUNNING"""
         # Claude 发起的 RUNNING
-        machine.process(HookEvent(
-            source="claude-code",
-            pane_id="test-pane-123",
-            event_type="SessionStart",
-            pane_generation=1,
-        ))
+        machine.process(
+            HookEvent(
+                source="claude-code",
+                pane_id="test-pane-123",
+                event_type="SessionStart",
+                pane_generation=1,
+            )
+        )
         assert machine.source == "claude-code"
 
         # shell.command_end 应该被忽略
@@ -162,39 +167,46 @@ class TestClaudeCodeTransitions:
     def test_pre_tool_use_same_source_no_reset_started_at(self, machine):
         """C2: PreToolUse 同源时不重置 started_at"""
         # 第一个工具
-        machine.process(HookEvent(
-            source="claude-code",
-            pane_id="test-pane-123",
-            event_type="PreToolUse",
-            data={"tool_name": "Read"},
-            pane_generation=1,
-        ))
+        machine.process(
+            HookEvent(
+                source="claude-code",
+                pane_id="test-pane-123",
+                event_type="PreToolUse",
+                data={"tool_name": "Read"},
+                pane_generation=1,
+            )
+        )
         first_started_at = machine.started_at
 
         # 等一小段时间
         import time
+
         time.sleep(0.01)
 
         # 第二个工具
-        machine.process(HookEvent(
-            source="claude-code",
-            pane_id="test-pane-123",
-            event_type="PreToolUse",
-            data={"tool_name": "Write"},
-            pane_generation=1,
-        ))
+        machine.process(
+            HookEvent(
+                source="claude-code",
+                pane_id="test-pane-123",
+                event_type="PreToolUse",
+                data={"tool_name": "Write"},
+                pane_generation=1,
+            )
+        )
 
         # started_at 应该保持不变
         assert machine.started_at == first_started_at
 
     def test_stop(self, machine):
         """C3: RUNNING → DONE (Stop)"""
-        machine.process(HookEvent(
-            source="claude-code",
-            pane_id="test-pane-123",
-            event_type="SessionStart",
-            pane_generation=1,
-        ))
+        machine.process(
+            HookEvent(
+                source="claude-code",
+                pane_id="test-pane-123",
+                event_type="SessionStart",
+                pane_generation=1,
+            )
+        )
 
         event = HookEvent(
             source="claude-code",
@@ -224,12 +236,14 @@ class TestClaudeCodeTransitions:
 
     def test_idle_prompt(self, machine):
         """C5: * → IDLE"""
-        machine.process(HookEvent(
-            source="claude-code",
-            pane_id="test-pane-123",
-            event_type="SessionStart",
-            pane_generation=1,
-        ))
+        machine.process(
+            HookEvent(
+                source="claude-code",
+                pane_id="test-pane-123",
+                event_type="SessionStart",
+                pane_generation=1,
+            )
+        )
 
         event = HookEvent(
             source="claude-code",
@@ -245,12 +259,14 @@ class TestClaudeCodeTransitions:
 
     def test_session_end(self, machine):
         """C6: * → IDLE"""
-        machine.process(HookEvent(
-            source="claude-code",
-            pane_id="test-pane-123",
-            event_type="SessionStart",
-            pane_generation=1,
-        ))
+        machine.process(
+            HookEvent(
+                source="claude-code",
+                pane_id="test-pane-123",
+                event_type="SessionStart",
+                pane_generation=1,
+            )
+        )
 
         event = HookEvent(
             source="claude-code",
@@ -270,12 +286,14 @@ class TestUserTransitions:
 
     def test_user_clear_waiting_focus(self, machine):
         """U1: WAITING → IDLE (iterm.focus)"""
-        machine.process(HookEvent(
-            source="claude-code",
-            pane_id="test-pane-123",
-            event_type="Notification:permission_prompt",
-            pane_generation=1,
-        ))
+        machine.process(
+            HookEvent(
+                source="claude-code",
+                pane_id="test-pane-123",
+                event_type="Notification:permission_prompt",
+                pane_generation=1,
+            )
+        )
 
         event = HookEvent(
             source="iterm",
@@ -293,20 +311,24 @@ class TestUserTransitions:
     def test_user_clear_done_click(self, machine):
         """U2: DONE → IDLE (frontend.click_pane)"""
         # 进入 DONE 状态
-        machine.process(HookEvent(
-            source="shell",
-            pane_id="test-pane-123",
-            event_type="command_start",
-            data={"command": "ls"},
-            pane_generation=1,
-        ))
-        machine.process(HookEvent(
-            source="shell",
-            pane_id="test-pane-123",
-            event_type="command_end",
-            data={"exit_code": 0},
-            pane_generation=1,
-        ))
+        machine.process(
+            HookEvent(
+                source="shell",
+                pane_id="test-pane-123",
+                event_type="command_start",
+                data={"command": "ls"},
+                pane_generation=1,
+            )
+        )
+        machine.process(
+            HookEvent(
+                source="shell",
+                pane_id="test-pane-123",
+                event_type="command_end",
+                data={"exit_code": 0},
+                pane_generation=1,
+            )
+        )
         assert machine.status == TaskStatus.DONE
 
         event = HookEvent(
@@ -328,12 +350,14 @@ class TestContentTransitions:
     def test_content_update_waiting_to_running(self, machine):
         """R1: WAITING_APPROVAL → RUNNING (content.update)"""
         # 进入 WAITING 状态
-        machine.process(HookEvent(
-            source="claude-code",
-            pane_id="test-pane-123",
-            event_type="Notification:permission_prompt",
-            pane_generation=1,
-        ))
+        machine.process(
+            HookEvent(
+                source="claude-code",
+                pane_id="test-pane-123",
+                event_type="Notification:permission_prompt",
+                pane_generation=1,
+            )
+        )
         assert machine.status == TaskStatus.WAITING_APPROVAL
         original_source = machine.source
 
@@ -354,12 +378,14 @@ class TestContentTransitions:
     def test_content_changed_waiting_to_running_compat(self, machine):
         """R1: WAITING_APPROVAL → RUNNING (content.changed 兼容)"""
         # 进入 WAITING 状态
-        machine.process(HookEvent(
-            source="claude-code",
-            pane_id="test-pane-123",
-            event_type="Notification:permission_prompt",
-            pane_generation=1,
-        ))
+        machine.process(
+            HookEvent(
+                source="claude-code",
+                pane_id="test-pane-123",
+                event_type="Notification:permission_prompt",
+                pane_generation=1,
+            )
+        )
         assert machine.status == TaskStatus.WAITING_APPROVAL
         original_source = machine.source
 
@@ -397,13 +423,15 @@ class TestTimerTransitions:
 
     def test_timer_check_running_to_long_running(self, machine):
         """T1: RUNNING → LONG_RUNNING (timer.check)"""
-        machine.process(HookEvent(
-            source="shell",
-            pane_id="test-pane-123",
-            event_type="command_start",
-            data={"command": "sleep 100"},
-            pane_generation=1,
-        ))
+        machine.process(
+            HookEvent(
+                source="shell",
+                pane_id="test-pane-123",
+                event_type="command_start",
+                data={"command": "sleep 100"},
+                pane_generation=1,
+            )
+        )
         original_source = machine.source
 
         event = HookEvent(
@@ -428,32 +456,38 @@ class TestStickyLongRunning:
     def test_long_running_ignores_same_source_shell_command_start(self, machine):
         """LONG_RUNNING 忽略同源 shell.command_start"""
         # 进入 shell RUNNING
-        machine.process(HookEvent(
-            source="shell",
-            pane_id="test-pane-123",
-            event_type="command_start",
-            data={"command": "sleep 100"},
-            pane_generation=1,
-        ))
+        machine.process(
+            HookEvent(
+                source="shell",
+                pane_id="test-pane-123",
+                event_type="command_start",
+                data={"command": "sleep 100"},
+                pane_generation=1,
+            )
+        )
         # 手动升级到 LONG_RUNNING
-        machine.process(HookEvent(
-            source="timer",
-            pane_id="test-pane-123",
-            event_type="check",
-            data={"elapsed": "1m 5s"},
-            pane_generation=1,
-        ))
+        machine.process(
+            HookEvent(
+                source="timer",
+                pane_id="test-pane-123",
+                event_type="check",
+                data={"elapsed": "1m 5s"},
+                pane_generation=1,
+            )
+        )
         assert machine.status == TaskStatus.LONG_RUNNING
         assert machine.source == "shell"
 
         # 同源 shell.command_start 应该被忽略
-        result = machine.process(HookEvent(
-            source="shell",
-            pane_id="test-pane-123",
-            event_type="command_start",
-            data={"command": "ls"},
-            pane_generation=1,
-        ))
+        result = machine.process(
+            HookEvent(
+                source="shell",
+                pane_id="test-pane-123",
+                event_type="command_start",
+                data={"command": "ls"},
+                pane_generation=1,
+            )
+        )
 
         assert result is None
         assert machine.status == TaskStatus.LONG_RUNNING
@@ -461,30 +495,36 @@ class TestStickyLongRunning:
     def test_long_running_ignores_same_source_claude_session_start(self, machine):
         """LONG_RUNNING 忽略同源 claude-code.SessionStart"""
         # 进入 claude-code RUNNING
-        machine.process(HookEvent(
-            source="claude-code",
-            pane_id="test-pane-123",
-            event_type="SessionStart",
-            pane_generation=1,
-        ))
+        machine.process(
+            HookEvent(
+                source="claude-code",
+                pane_id="test-pane-123",
+                event_type="SessionStart",
+                pane_generation=1,
+            )
+        )
         # 手动升级到 LONG_RUNNING
-        machine.process(HookEvent(
-            source="timer",
-            pane_id="test-pane-123",
-            event_type="check",
-            data={"elapsed": "1m 5s"},
-            pane_generation=1,
-        ))
+        machine.process(
+            HookEvent(
+                source="timer",
+                pane_id="test-pane-123",
+                event_type="check",
+                data={"elapsed": "1m 5s"},
+                pane_generation=1,
+            )
+        )
         assert machine.status == TaskStatus.LONG_RUNNING
         assert machine.source == "claude-code"
 
         # 同源 SessionStart 应该被忽略
-        result = machine.process(HookEvent(
-            source="claude-code",
-            pane_id="test-pane-123",
-            event_type="SessionStart",
-            pane_generation=1,
-        ))
+        result = machine.process(
+            HookEvent(
+                source="claude-code",
+                pane_id="test-pane-123",
+                event_type="SessionStart",
+                pane_generation=1,
+            )
+        )
 
         assert result is None
         assert machine.status == TaskStatus.LONG_RUNNING
@@ -492,30 +532,36 @@ class TestStickyLongRunning:
     def test_long_running_ignores_same_source_pre_tool_use(self, machine):
         """LONG_RUNNING 忽略同源 claude-code.PreToolUse"""
         # 进入 claude-code RUNNING
-        machine.process(HookEvent(
-            source="claude-code",
-            pane_id="test-pane-123",
-            event_type="SessionStart",
-            pane_generation=1,
-        ))
+        machine.process(
+            HookEvent(
+                source="claude-code",
+                pane_id="test-pane-123",
+                event_type="SessionStart",
+                pane_generation=1,
+            )
+        )
         # 手动升级到 LONG_RUNNING
-        machine.process(HookEvent(
-            source="timer",
-            pane_id="test-pane-123",
-            event_type="check",
-            data={"elapsed": "1m 5s"},
-            pane_generation=1,
-        ))
+        machine.process(
+            HookEvent(
+                source="timer",
+                pane_id="test-pane-123",
+                event_type="check",
+                data={"elapsed": "1m 5s"},
+                pane_generation=1,
+            )
+        )
         assert machine.status == TaskStatus.LONG_RUNNING
 
         # 同源 PreToolUse 应该被忽略
-        result = machine.process(HookEvent(
-            source="claude-code",
-            pane_id="test-pane-123",
-            event_type="PreToolUse",
-            data={"tool_name": "Read"},
-            pane_generation=1,
-        ))
+        result = machine.process(
+            HookEvent(
+                source="claude-code",
+                pane_id="test-pane-123",
+                event_type="PreToolUse",
+                data={"tool_name": "Read"},
+                pane_generation=1,
+            )
+        )
 
         assert result is None
         assert machine.status == TaskStatus.LONG_RUNNING
@@ -523,30 +569,36 @@ class TestStickyLongRunning:
     def test_long_running_allows_cross_source_command_start(self, machine):
         """LONG_RUNNING 允许跨源 command_start"""
         # 进入 shell LONG_RUNNING
-        machine.process(HookEvent(
-            source="shell",
-            pane_id="test-pane-123",
-            event_type="command_start",
-            data={"command": "sleep 100"},
-            pane_generation=1,
-        ))
-        machine.process(HookEvent(
-            source="timer",
-            pane_id="test-pane-123",
-            event_type="check",
-            data={"elapsed": "1m 5s"},
-            pane_generation=1,
-        ))
+        machine.process(
+            HookEvent(
+                source="shell",
+                pane_id="test-pane-123",
+                event_type="command_start",
+                data={"command": "sleep 100"},
+                pane_generation=1,
+            )
+        )
+        machine.process(
+            HookEvent(
+                source="timer",
+                pane_id="test-pane-123",
+                event_type="check",
+                data={"elapsed": "1m 5s"},
+                pane_generation=1,
+            )
+        )
         assert machine.status == TaskStatus.LONG_RUNNING
         assert machine.source == "shell"
 
         # 跨源 claude-code.SessionStart 应该成功
-        result = machine.process(HookEvent(
-            source="claude-code",
-            pane_id="test-pane-123",
-            event_type="SessionStart",
-            pane_generation=1,
-        ))
+        result = machine.process(
+            HookEvent(
+                source="claude-code",
+                pane_id="test-pane-123",
+                event_type="SessionStart",
+                pane_generation=1,
+            )
+        )
 
         assert result is not None
         assert machine.status == TaskStatus.RUNNING
@@ -555,28 +607,34 @@ class TestStickyLongRunning:
     def test_long_running_allows_stop(self, machine):
         """LONG_RUNNING 允许 Stop 信号"""
         # 进入 claude-code LONG_RUNNING
-        machine.process(HookEvent(
-            source="claude-code",
-            pane_id="test-pane-123",
-            event_type="SessionStart",
-            pane_generation=1,
-        ))
-        machine.process(HookEvent(
-            source="timer",
-            pane_id="test-pane-123",
-            event_type="check",
-            data={"elapsed": "1m 5s"},
-            pane_generation=1,
-        ))
+        machine.process(
+            HookEvent(
+                source="claude-code",
+                pane_id="test-pane-123",
+                event_type="SessionStart",
+                pane_generation=1,
+            )
+        )
+        machine.process(
+            HookEvent(
+                source="timer",
+                pane_id="test-pane-123",
+                event_type="check",
+                data={"elapsed": "1m 5s"},
+                pane_generation=1,
+            )
+        )
         assert machine.status == TaskStatus.LONG_RUNNING
 
         # Stop 应该成功
-        result = machine.process(HookEvent(
-            source="claude-code",
-            pane_id="test-pane-123",
-            event_type="Stop",
-            pane_generation=1,
-        ))
+        result = machine.process(
+            HookEvent(
+                source="claude-code",
+                pane_id="test-pane-123",
+                event_type="Stop",
+                pane_generation=1,
+            )
+        )
 
         assert result is not None
         assert machine.status == TaskStatus.DONE
@@ -613,13 +671,15 @@ class TestStateId:
         """状态转换时 state_id 递增"""
         initial_id = machine.state_id
 
-        machine.process(HookEvent(
-            source="shell",
-            pane_id="test-pane-123",
-            event_type="command_start",
-            data={"command": "ls"},
-            pane_generation=1,
-        ))
+        machine.process(
+            HookEvent(
+                source="shell",
+                pane_id="test-pane-123",
+                event_type="command_start",
+                data={"command": "ls"},
+                pane_generation=1,
+            )
+        )
 
         assert machine.state_id > initial_id
 
@@ -628,12 +688,14 @@ class TestStateId:
         initial_id = machine.state_id
 
         # 尝试无效的转换
-        machine.process(HookEvent(
-            source="content",
-            pane_id="test-pane-123",
-            event_type="changed",
-            pane_generation=1,
-        ))
+        machine.process(
+            HookEvent(
+                source="content",
+                pane_id="test-pane-123",
+                event_type="changed",
+                pane_generation=1,
+            )
+        )
 
         assert machine.state_id == initial_id
 
@@ -643,13 +705,15 @@ class TestHistory:
 
     def test_history_records_transitions(self, machine):
         """历史记录包含转换"""
-        machine.process(HookEvent(
-            source="shell",
-            pane_id="test-pane-123",
-            event_type="command_start",
-            data={"command": "ls"},
-            pane_generation=1,
-        ))
+        machine.process(
+            HookEvent(
+                source="shell",
+                pane_id="test-pane-123",
+                event_type="command_start",
+                data={"command": "ls"},
+                pane_generation=1,
+            )
+        )
 
         history = machine.history
         assert len(history) == 1
@@ -658,12 +722,14 @@ class TestHistory:
 
     def test_history_records_failed_transitions(self, machine):
         """历史记录包含失败的转换"""
-        machine.process(HookEvent(
-            source="content",
-            pane_id="test-pane-123",
-            event_type="changed",
-            pane_generation=1,
-        ))
+        machine.process(
+            HookEvent(
+                source="content",
+                pane_id="test-pane-123",
+                event_type="changed",
+                pane_generation=1,
+            )
+        )
 
         history = machine.history
         assert len(history) == 1

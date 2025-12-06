@@ -1,12 +1,12 @@
 """Pane 显示层测试"""
 
-import asyncio
-import pytest
 from datetime import datetime
 
-from termsupervisor.pane import TaskStatus, StateChange, Pane
-from termsupervisor.timer import Timer
+import pytest
+
+from termsupervisor.pane import Pane, StateChange, TaskStatus
 from termsupervisor.telemetry import metrics
+from termsupervisor.timer import Timer
 
 
 @pytest.fixture
@@ -54,25 +54,29 @@ class TestStateChange:
     def test_state_id_prevents_stale_update(self, pane):
         """state_id 防乱序"""
         # 先更新到 state_id=10
-        pane.handle_state_change(StateChange(
-            old_status=TaskStatus.IDLE,
-            new_status=TaskStatus.RUNNING,
-            old_source="shell",
-            new_source="shell",
-            description="first",
-            state_id=10,
-        ))
+        pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.IDLE,
+                new_status=TaskStatus.RUNNING,
+                old_source="shell",
+                new_source="shell",
+                description="first",
+                state_id=10,
+            )
+        )
         assert pane.state_id == 10
 
         # 尝试用旧 state_id 更新
-        result = pane.handle_state_change(StateChange(
-            old_status=TaskStatus.RUNNING,
-            new_status=TaskStatus.DONE,
-            old_source="shell",
-            new_source="shell",
-            description="stale",
-            state_id=5,  # 旧的
-        ))
+        result = pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.RUNNING,
+                new_status=TaskStatus.DONE,
+                old_source="shell",
+                new_source="shell",
+                description="stale",
+                state_id=5,  # 旧的
+            )
+        )
 
         assert result is False
         assert pane.status == TaskStatus.RUNNING  # 状态未变
@@ -86,14 +90,16 @@ class TestStateChange:
 
         pane.set_on_display_change(callback)
 
-        pane.handle_state_change(StateChange(
-            old_status=TaskStatus.IDLE,
-            new_status=TaskStatus.RUNNING,
-            old_source="shell",
-            new_source="shell",
-            description="test",
-            state_id=1,
-        ))
+        pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.IDLE,
+                new_status=TaskStatus.RUNNING,
+                old_source="shell",
+                new_source="shell",
+                description="test",
+                state_id=1,
+            )
+        )
 
         assert len(changes) == 1
         assert changes[0].status == TaskStatus.RUNNING
@@ -105,25 +111,29 @@ class TestDelayedDisplay:
     def test_done_to_idle_delayed_display(self, pane, timer):
         """DONE → IDLE 时延迟展示（状态机已转换，显示层保持 DONE）"""
         # 进入 DONE 状态
-        pane.handle_state_change(StateChange(
-            old_status=TaskStatus.IDLE,
-            new_status=TaskStatus.DONE,
-            old_source="shell",
-            new_source="shell",
-            description="done",
-            state_id=1,
-        ))
+        pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.IDLE,
+                new_status=TaskStatus.DONE,
+                old_source="shell",
+                new_source="shell",
+                description="done",
+                state_id=1,
+            )
+        )
         assert pane.status == TaskStatus.DONE
 
         # DONE → IDLE（状态机已转换）
-        result = pane.handle_state_change(StateChange(
-            old_status=TaskStatus.DONE,
-            new_status=TaskStatus.IDLE,
-            old_source="shell",
-            new_source="user",
-            description="",
-            state_id=2,
-        ))
+        result = pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.DONE,
+                new_status=TaskStatus.IDLE,
+                old_source="shell",
+                new_source="user",
+                description="",
+                state_id=2,
+            )
+        )
 
         # 延迟展示：返回 False，显示仍为 DONE
         assert result is False
@@ -135,24 +145,28 @@ class TestDelayedDisplay:
 
     def test_failed_to_idle_delayed_display(self, pane, timer):
         """FAILED → IDLE 时延迟展示"""
-        pane.handle_state_change(StateChange(
-            old_status=TaskStatus.IDLE,
-            new_status=TaskStatus.FAILED,
-            old_source="shell",
-            new_source="shell",
-            description="failed",
-            state_id=1,
-        ))
+        pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.IDLE,
+                new_status=TaskStatus.FAILED,
+                old_source="shell",
+                new_source="shell",
+                description="failed",
+                state_id=1,
+            )
+        )
         assert pane.status == TaskStatus.FAILED
 
-        result = pane.handle_state_change(StateChange(
-            old_status=TaskStatus.FAILED,
-            new_status=TaskStatus.IDLE,
-            old_source="shell",
-            new_source="user",
-            description="",
-            state_id=2,
-        ))
+        result = pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.FAILED,
+                new_status=TaskStatus.IDLE,
+                old_source="shell",
+                new_source="user",
+                description="",
+                state_id=2,
+            )
+        )
 
         assert result is False
         assert pane.status == TaskStatus.FAILED
@@ -161,23 +175,27 @@ class TestDelayedDisplay:
 
     def test_running_to_done_immediate(self, pane, timer):
         """RUNNING → DONE 立即展示"""
-        pane.handle_state_change(StateChange(
-            old_status=TaskStatus.IDLE,
-            new_status=TaskStatus.RUNNING,
-            old_source="shell",
-            new_source="shell",
-            description="running",
-            state_id=1,
-        ))
+        pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.IDLE,
+                new_status=TaskStatus.RUNNING,
+                old_source="shell",
+                new_source="shell",
+                description="running",
+                state_id=1,
+            )
+        )
 
-        result = pane.handle_state_change(StateChange(
-            old_status=TaskStatus.RUNNING,
-            new_status=TaskStatus.DONE,
-            old_source="shell",
-            new_source="shell",
-            description="done",
-            state_id=2,
-        ))
+        result = pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.RUNNING,
+                new_status=TaskStatus.DONE,
+                old_source="shell",
+                new_source="shell",
+                description="done",
+                state_id=2,
+            )
+        )
 
         # 立即展示
         assert result is True
@@ -189,51 +207,59 @@ class TestDelayedDisplay:
     def test_new_state_cancels_delayed_display(self, pane, timer):
         """新状态取消延迟展示任务"""
         # IDLE → DONE
-        pane.handle_state_change(StateChange(
-            old_status=TaskStatus.IDLE,
-            new_status=TaskStatus.DONE,
-            old_source="shell",
-            new_source="shell",
-            description="done",
-            state_id=1,
-        ))
+        pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.IDLE,
+                new_status=TaskStatus.DONE,
+                old_source="shell",
+                new_source="shell",
+                description="done",
+                state_id=1,
+            )
+        )
 
         # DONE → IDLE（触发延迟展示）
-        pane.handle_state_change(StateChange(
-            old_status=TaskStatus.DONE,
-            new_status=TaskStatus.IDLE,
-            old_source="shell",
-            new_source="user",
-            description="",
-            state_id=2,
-        ))
+        pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.DONE,
+                new_status=TaskStatus.IDLE,
+                old_source="shell",
+                new_source="user",
+                description="",
+                state_id=2,
+            )
+        )
 
         delay_name = f"pane_display_delay_{pane.pane_id[:8]}"
         assert timer.has_delay(delay_name)
 
         # 新命令开始，应该取消延迟任务
-        pane.handle_state_change(StateChange(
-            old_status=TaskStatus.IDLE,
-            new_status=TaskStatus.RUNNING,
-            old_source="shell",
-            new_source="shell",
-            description="new cmd",
-            state_id=3,
-        ))
+        pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.IDLE,
+                new_status=TaskStatus.RUNNING,
+                old_source="shell",
+                new_source="shell",
+                description="new cmd",
+                state_id=3,
+            )
+        )
 
         assert pane.status == TaskStatus.RUNNING
         assert not timer.has_delay(delay_name)
 
     def test_idle_to_running_immediate(self, pane, timer):
         """IDLE → RUNNING 立即展示（无延迟）"""
-        result = pane.handle_state_change(StateChange(
-            old_status=TaskStatus.IDLE,
-            new_status=TaskStatus.RUNNING,
-            old_source="shell",
-            new_source="shell",
-            description="running",
-            state_id=1,
-        ))
+        result = pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.IDLE,
+                new_status=TaskStatus.RUNNING,
+                old_source="shell",
+                new_source="shell",
+                description="running",
+                state_id=1,
+            )
+        )
 
         assert result is True
         assert pane.status == TaskStatus.RUNNING
@@ -247,15 +273,17 @@ class TestNotificationSuppression:
     def test_suppress_short_task(self, pane):
         """短任务抑制通知"""
         # 模拟短时间任务
-        pane.handle_state_change(StateChange(
-            old_status=TaskStatus.IDLE,
-            new_status=TaskStatus.DONE,
-            old_source="shell",
-            new_source="shell",
-            description="done",
-            state_id=1,
-            running_duration=1.0,  # < 3s
-        ))
+        pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.IDLE,
+                new_status=TaskStatus.DONE,
+                old_source="shell",
+                new_source="shell",
+                description="done",
+                state_id=1,
+                running_duration=1.0,  # < 3s
+            )
+        )
 
         suppressed, reason = pane.should_suppress_notification()
 
@@ -267,15 +295,17 @@ class TestNotificationSuppression:
         # 设置 focus checker
         pane.set_focus_checker(lambda pid: pid == "test-pane-123")
 
-        pane.handle_state_change(StateChange(
-            old_status=TaskStatus.IDLE,
-            new_status=TaskStatus.DONE,
-            old_source="shell",
-            new_source="shell",
-            description="done",
-            state_id=1,
-            running_duration=10.0,  # > 3s
-        ))
+        pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.IDLE,
+                new_status=TaskStatus.DONE,
+                old_source="shell",
+                new_source="shell",
+                description="done",
+                state_id=1,
+                running_duration=10.0,  # > 3s
+            )
+        )
 
         suppressed, reason = pane.should_suppress_notification()
 
@@ -286,15 +316,17 @@ class TestNotificationSuppression:
         """长任务且未 focus 不抑制"""
         pane.set_focus_checker(lambda pid: False)
 
-        pane.handle_state_change(StateChange(
-            old_status=TaskStatus.IDLE,
-            new_status=TaskStatus.DONE,
-            old_source="shell",
-            new_source="shell",
-            description="done",
-            state_id=1,
-            running_duration=10.0,
-        ))
+        pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.IDLE,
+                new_status=TaskStatus.DONE,
+                old_source="shell",
+                new_source="shell",
+                description="done",
+                state_id=1,
+                running_duration=10.0,
+            )
+        )
 
         suppressed, reason = pane.should_suppress_notification()
 
@@ -302,15 +334,17 @@ class TestNotificationSuppression:
 
     def test_only_done_failed_suppressed(self, pane):
         """只有 DONE/FAILED 判断抑制"""
-        pane.handle_state_change(StateChange(
-            old_status=TaskStatus.IDLE,
-            new_status=TaskStatus.RUNNING,
-            old_source="shell",
-            new_source="shell",
-            description="running",
-            state_id=1,
-            running_duration=0.5,
-        ))
+        pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.IDLE,
+                new_status=TaskStatus.RUNNING,
+                old_source="shell",
+                new_source="shell",
+                description="running",
+                state_id=1,
+                running_duration=0.5,
+            )
+        )
 
         suppressed, reason = pane.should_suppress_notification()
 
@@ -347,14 +381,16 @@ class TestConvenienceMethods:
         """is_running 方法"""
         assert pane.is_running() is False
 
-        pane.handle_state_change(StateChange(
-            old_status=TaskStatus.IDLE,
-            new_status=TaskStatus.RUNNING,
-            old_source="shell",
-            new_source="shell",
-            description="",
-            state_id=1,
-        ))
+        pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.IDLE,
+                new_status=TaskStatus.RUNNING,
+                old_source="shell",
+                new_source="shell",
+                description="",
+                state_id=1,
+            )
+        )
 
         assert pane.is_running() is True
 
@@ -362,27 +398,31 @@ class TestConvenienceMethods:
         """needs_notification 方法"""
         assert pane.needs_notification() is False
 
-        pane.handle_state_change(StateChange(
-            old_status=TaskStatus.IDLE,
-            new_status=TaskStatus.DONE,
-            old_source="shell",
-            new_source="shell",
-            description="",
-            state_id=1,
-        ))
+        pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.IDLE,
+                new_status=TaskStatus.DONE,
+                old_source="shell",
+                new_source="shell",
+                description="",
+                state_id=1,
+            )
+        )
 
         assert pane.needs_notification() is True
 
     def test_get_display_dict(self, pane):
         """get_display_dict 方法"""
-        pane.handle_state_change(StateChange(
-            old_status=TaskStatus.IDLE,
-            new_status=TaskStatus.RUNNING,
-            old_source="shell",
-            new_source="shell",
-            description="test",
-            state_id=1,
-        ))
+        pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.IDLE,
+                new_status=TaskStatus.RUNNING,
+                old_source="shell",
+                new_source="shell",
+                description="test",
+                state_id=1,
+            )
+        )
 
         d = pane.get_display_dict()
 
@@ -396,15 +436,17 @@ class TestAutoDismiss:
 
     def test_done_registers_auto_dismiss(self, pane, timer):
         """DONE 状态注册 auto-dismiss 定时器"""
-        pane.handle_state_change(StateChange(
-            old_status=TaskStatus.IDLE,
-            new_status=TaskStatus.DONE,
-            old_source="shell",
-            new_source="shell",
-            description="done",
-            state_id=1,
-            running_duration=10.0,
-        ))
+        pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.IDLE,
+                new_status=TaskStatus.DONE,
+                old_source="shell",
+                new_source="shell",
+                description="done",
+                state_id=1,
+                running_duration=10.0,
+            )
+        )
 
         assert pane.status == TaskStatus.DONE
         auto_dismiss_name = f"pane_auto_dismiss_{pane.pane_id[:8]}"
@@ -412,15 +454,17 @@ class TestAutoDismiss:
 
     def test_failed_registers_auto_dismiss(self, pane, timer):
         """FAILED 状态注册 auto-dismiss 定时器"""
-        pane.handle_state_change(StateChange(
-            old_status=TaskStatus.IDLE,
-            new_status=TaskStatus.FAILED,
-            old_source="shell",
-            new_source="shell",
-            description="failed",
-            state_id=1,
-            running_duration=10.0,
-        ))
+        pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.IDLE,
+                new_status=TaskStatus.FAILED,
+                old_source="shell",
+                new_source="shell",
+                description="failed",
+                state_id=1,
+                running_duration=10.0,
+            )
+        )
 
         assert pane.status == TaskStatus.FAILED
         auto_dismiss_name = f"pane_auto_dismiss_{pane.pane_id[:8]}"
@@ -428,40 +472,46 @@ class TestAutoDismiss:
 
     def test_new_state_cancels_auto_dismiss(self, pane, timer):
         """新状态变化取消 auto-dismiss 定时器"""
-        pane.handle_state_change(StateChange(
-            old_status=TaskStatus.IDLE,
-            new_status=TaskStatus.DONE,
-            old_source="shell",
-            new_source="shell",
-            description="done",
-            state_id=1,
-        ))
+        pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.IDLE,
+                new_status=TaskStatus.DONE,
+                old_source="shell",
+                new_source="shell",
+                description="done",
+                state_id=1,
+            )
+        )
 
         auto_dismiss_name = f"pane_auto_dismiss_{pane.pane_id[:8]}"
         assert timer.has_delay(auto_dismiss_name)
 
         # 新命令开始，取消 auto-dismiss
-        pane.handle_state_change(StateChange(
-            old_status=TaskStatus.DONE,
-            new_status=TaskStatus.RUNNING,
-            old_source="shell",
-            new_source="shell",
-            description="new cmd",
-            state_id=2,
-        ))
+        pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.DONE,
+                new_status=TaskStatus.RUNNING,
+                old_source="shell",
+                new_source="shell",
+                description="new cmd",
+                state_id=2,
+            )
+        )
 
         assert not timer.has_delay(auto_dismiss_name)
 
     def test_running_no_auto_dismiss(self, pane, timer):
         """RUNNING 状态不注册 auto-dismiss"""
-        pane.handle_state_change(StateChange(
-            old_status=TaskStatus.IDLE,
-            new_status=TaskStatus.RUNNING,
-            old_source="shell",
-            new_source="shell",
-            description="running",
-            state_id=1,
-        ))
+        pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.IDLE,
+                new_status=TaskStatus.RUNNING,
+                old_source="shell",
+                new_source="shell",
+                description="running",
+                state_id=1,
+            )
+        )
 
         auto_dismiss_name = f"pane_auto_dismiss_{pane.pane_id[:8]}"
         assert not timer.has_delay(auto_dismiss_name)
@@ -472,43 +522,49 @@ class TestQuietCompletion:
 
     def test_short_task_quiet_completion(self, pane):
         """短任务标记为 quiet_completion"""
-        pane.handle_state_change(StateChange(
-            old_status=TaskStatus.IDLE,
-            new_status=TaskStatus.DONE,
-            old_source="shell",
-            new_source="shell",
-            description="done",
-            state_id=1,
-            running_duration=1.0,  # < 3s
-        ))
+        pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.IDLE,
+                new_status=TaskStatus.DONE,
+                old_source="shell",
+                new_source="shell",
+                description="done",
+                state_id=1,
+                running_duration=1.0,  # < 3s
+            )
+        )
 
         assert pane.display_state.quiet_completion is True
 
     def test_long_task_no_quiet_completion(self, pane):
         """长任务不标记为 quiet_completion"""
-        pane.handle_state_change(StateChange(
-            old_status=TaskStatus.IDLE,
-            new_status=TaskStatus.DONE,
-            old_source="shell",
-            new_source="shell",
-            description="done",
-            state_id=1,
-            running_duration=10.0,  # > 3s
-        ))
+        pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.IDLE,
+                new_status=TaskStatus.DONE,
+                old_source="shell",
+                new_source="shell",
+                description="done",
+                state_id=1,
+                running_duration=10.0,  # > 3s
+            )
+        )
 
         assert pane.display_state.quiet_completion is False
 
     def test_quiet_completion_in_display_dict(self, pane):
         """quiet_completion 出现在 display_dict 中"""
-        pane.handle_state_change(StateChange(
-            old_status=TaskStatus.IDLE,
-            new_status=TaskStatus.DONE,
-            old_source="shell",
-            new_source="shell",
-            description="done",
-            state_id=1,
-            running_duration=1.0,
-        ))
+        pane.handle_state_change(
+            StateChange(
+                old_status=TaskStatus.IDLE,
+                new_status=TaskStatus.DONE,
+                old_source="shell",
+                new_source="shell",
+                description="done",
+                state_id=1,
+                running_duration=1.0,
+            )
+        )
 
         d = pane.get_display_dict()
         assert "quiet_completion" in d

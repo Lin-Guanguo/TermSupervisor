@@ -8,18 +8,18 @@
 - 内容更新触发渲染
 """
 
-from datetime import datetime
-from typing import Callable, Any, TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
-from ..telemetry import get_logger, metrics
 from ..config import (
+    AUTO_DISMISS_DWELL_SECONDS,
     DISPLAY_DELAY_SECONDS,
     NOTIFICATION_MIN_DURATION_SECONDS,
-    AUTO_DISMISS_DWELL_SECONDS,
-    RECENTLY_FINISHED_HINT_SECONDS,
     QUIET_COMPLETION_THRESHOLD_SECONDS,
+    RECENTLY_FINISHED_HINT_SECONDS,
 )
-from .types import TaskStatus, StateChange, DisplayState
+from ..telemetry import get_logger, metrics
+from .types import DisplayState, StateChange, TaskStatus
 
 if TYPE_CHECKING:
     from ..timer import Timer
@@ -158,9 +158,7 @@ class Pane:
         if old_status in {TaskStatus.DONE, TaskStatus.FAILED} and new_status == TaskStatus.IDLE:
             if self._timer:
                 self._register_delayed_display(change)
-                logger.debug(
-                    f"[Pane:{pane_short}] Delayed display: {old_status.value} → IDLE (5s)"
-                )
+                logger.debug(f"[Pane:{pane_short}] Delayed display: {old_status.value} → IDLE (5s)")
                 return False  # 显示暂未改变
 
         # 4. 立即更新显示状态

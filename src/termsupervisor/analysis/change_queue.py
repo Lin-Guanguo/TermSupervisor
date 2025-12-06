@@ -3,19 +3,20 @@
 用于 Supervisor 内容节流的数据结构。
 """
 
-from dataclasses import dataclass, field
 from collections import deque
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..pane import TaskStatus
     from ..iterm.client import JobMetadata
+    from ..pane import TaskStatus
 
 
 @dataclass
 class PaneChange:
     """单次变化记录"""
+
     timestamp: datetime
     change_type: str  # "significant" | "minor" | "thinking"
     diff_lines: list[str]  # 原始 diff 行
@@ -24,12 +25,13 @@ class PaneChange:
     changed_line_count: int  # 变化行数
     # Content heuristic fields (Phase 2)
     newline_count: int = 0  # Number of newlines in cleaned tail
-    burst_length: int = 0   # Char count increase since last record
+    burst_length: int = 0  # Char count increase since last record
 
 
 @dataclass
 class PaneHistory:
     """Pane 历史记录 - 用于状态分析"""
+
     session_id: str
     pane_name: str
     changes: deque = field(default_factory=lambda: deque(maxlen=10))
@@ -60,16 +62,17 @@ class PaneHistory:
 @dataclass
 class ChangeRecord:
     """队列变化记录"""
-    timestamp: datetime           # 创建时间
-    updated_at: datetime          # 最后更新时间
-    content_hash: str             # 内容 hash（清洗后）
-    content_snapshot: str         # 内容快照（清洗后）
-    diff_summary: str             # 变化摘要（与 [-2] 的差异）
-    changed_lines: int            # 与 [-2] 的变化行数
+
+    timestamp: datetime  # 创建时间
+    updated_at: datetime  # 最后更新时间
+    content_hash: str  # 内容 hash（清洗后）
+    content_snapshot: str  # 内容快照（清洗后）
+    diff_summary: str  # 变化摘要（与 [-2] 的差异）
+    changed_lines: int  # 与 [-2] 的变化行数
     # Content heuristic fields (Phase 2)
-    newline_count: int = 0        # Line count in cleaned content
-    char_count: int = 0           # Char count in cleaned content (for burst calc)
-    raw_tail: str = ""            # Raw (uncleaned) last N lines for heuristic pattern matching
+    newline_count: int = 0  # Line count in cleaned content
+    char_count: int = 0  # Char count in cleaned content (for burst calc)
+    raw_tail: str = ""  # Raw (uncleaned) last N lines for heuristic pattern matching
 
 
 class PaneChangeQueue:
@@ -88,10 +91,10 @@ class PaneChangeQueue:
         from termsupervisor import config
 
         self.session_id = session_id
-        self._records: List[ChangeRecord] = []
+        self._records: list[ChangeRecord] = []
 
         # 刷新相关状态
-        self._last_render_content: str = ""      # 上次渲染的内容
+        self._last_render_content: str = ""  # 上次渲染的内容
         self._last_render_time: datetime | None = None  # 上次渲染时间
 
         # 配置
@@ -127,15 +130,15 @@ class PaneChangeQueue:
         Returns:
             是否应触发 SVG 刷新
         """
-        from termsupervisor.analysis.content_cleaner import ContentCleaner
         from termsupervisor import config
+        from termsupervisor.analysis.content_cleaner import ContentCleaner
 
         now = datetime.now()
         cleaned_content = ContentCleaner.clean_content_str(content)
         content_hash = ContentCleaner.content_hash(content)
         # Store raw tail for heuristic pattern matching
-        raw_lines = content.split('\n')
-        raw_tail = '\n'.join(raw_lines[-config.SCREEN_LAST_N_LINES:])
+        raw_lines = content.split("\n")
+        raw_tail = "\n".join(raw_lines[-config.SCREEN_LAST_N_LINES :])
 
         # === 队列为空: 初始化 ===
         if len(self._records) == 0:
@@ -159,7 +162,7 @@ class PaneChangeQueue:
 
     def _init_queue(self, now: datetime, content_hash: str, cleaned_content: str, raw_tail: str):
         """初始化: push 两条相同记录"""
-        newline_count = cleaned_content.count('\n') + 1 if cleaned_content else 0
+        newline_count = cleaned_content.count("\n") + 1 if cleaned_content else 0
         char_count = len(cleaned_content)
         record = ChangeRecord(
             timestamp=now,
@@ -174,17 +177,19 @@ class PaneChangeQueue:
         )
         # 添加两条相同记录
         self._records.append(record)
-        self._records.append(ChangeRecord(
-            timestamp=now,
-            updated_at=now,
-            content_hash=content_hash,
-            content_snapshot=cleaned_content,
-            diff_summary="(initial)",
-            changed_lines=0,
-            newline_count=newline_count,
-            char_count=char_count,
-            raw_tail=raw_tail,
-        ))
+        self._records.append(
+            ChangeRecord(
+                timestamp=now,
+                updated_at=now,
+                content_hash=content_hash,
+                content_snapshot=cleaned_content,
+                diff_summary="(initial)",
+                changed_lines=0,
+                newline_count=newline_count,
+                char_count=char_count,
+                raw_tail=raw_tail,
+            )
+        )
         self._last_render_content = cleaned_content
         self._last_render_time = now
         # Initialize heuristic tracking
@@ -198,7 +203,7 @@ class PaneChangeQueue:
         tail.content_hash = content_hash
         tail.content_snapshot = cleaned_content
         # Update heuristic metrics
-        tail.newline_count = cleaned_content.count('\n') + 1 if cleaned_content else 0
+        tail.newline_count = cleaned_content.count("\n") + 1 if cleaned_content else 0
         tail.char_count = len(cleaned_content)
         tail.raw_tail = raw_tail
 
@@ -217,9 +222,7 @@ class PaneChangeQueue:
         """
         from termsupervisor.analysis.content_cleaner import ContentCleaner
 
-        changed_lines, _ = ContentCleaner.diff_lines(
-            self._last_render_content, cleaned_content
-        )
+        changed_lines, _ = ContentCleaner.diff_lines(self._last_render_content, cleaned_content)
 
         if changed_lines == 0:
             return False
@@ -260,7 +263,7 @@ class PaneChangeQueue:
         if changed_lines >= self._new_record_lines:
             # push 新记录，当前 tail 变成 base
             diff_summary = self._make_summary(diff_details)
-            newline_count = cleaned_content.count('\n') + 1 if cleaned_content else 0
+            newline_count = cleaned_content.count("\n") + 1 if cleaned_content else 0
             char_count = len(cleaned_content)
             new_record = ChangeRecord(
                 timestamp=now,
@@ -275,11 +278,11 @@ class PaneChangeQueue:
             self._records.append(new_record)
             self._trim()
 
-    def _make_summary(self, diff_details: List[str]) -> str:
+    def _make_summary(self, diff_details: list[str]) -> str:
         """生成变化摘要"""
         # 取前 3 行新增内容
-        added_lines = [l[1:] for l in diff_details if l.startswith('+')][:3]
-        return ' | '.join(added_lines) if added_lines else "(no summary)"
+        added_lines = [line[1:] for line in diff_details if line.startswith("+")][:3]
+        return " | ".join(added_lines) if added_lines else "(no summary)"
 
     def _trim(self):
         """裁剪队列到最大长度"""
@@ -306,7 +309,7 @@ class PaneChangeQueue:
         """对比基准 (倒数第二)"""
         return self._records[-2] if len(self._records) >= 2 else None
 
-    def get_recent(self, n: int = 5) -> List[ChangeRecord]:
+    def get_recent(self, n: int = 5) -> list[ChangeRecord]:
         """获取最近 n 条"""
         return self._records[-n:] if self._records else []
 
@@ -351,7 +354,7 @@ class PaneChangeQueue:
             content = self._records[-1].content_snapshot
         if not content:
             return []
-        lines = content.split('\n')
+        lines = content.split("\n")
         return lines[-n:] if len(lines) >= n else lines
 
     def get_quiet_duration(self) -> float:

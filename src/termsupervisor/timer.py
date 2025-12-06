@@ -22,11 +22,12 @@
 
 import asyncio
 import inspect
-from dataclasses import dataclass, field
-from typing import Callable, Any, Coroutine
+from collections.abc import Callable, Coroutine
+from dataclasses import dataclass
+from typing import Any
 
-from .telemetry import get_logger, metrics
 from .config import METRICS_ENABLED
+from .telemetry import get_logger, metrics
 
 logger = get_logger(__name__)
 
@@ -34,6 +35,7 @@ logger = get_logger(__name__)
 @dataclass
 class IntervalTask:
     """周期任务"""
+
     name: str
     interval: float  # 秒
     callback: Callable[[], Any | Coroutine[Any, Any, Any]]
@@ -43,6 +45,7 @@ class IntervalTask:
 @dataclass
 class DelayTask:
     """延迟任务"""
+
     name: str
     delay: float  # 秒
     callback: Callable[[], Any | Coroutine[Any, Any, Any]]
@@ -68,6 +71,7 @@ class Timer:
             tick_interval: tick 间隔（秒），None 使用配置默认值
         """
         from . import config
+
         self._tick_interval = tick_interval or config.TIMER_TICK_INTERVAL
         self._interval_tasks: dict[str, IntervalTask] = {}
         self._delay_tasks: dict[str, DelayTask] = {}
@@ -75,10 +79,7 @@ class Timer:
         self._task: asyncio.Task | None = None
 
     def register_interval(
-        self,
-        name: str,
-        interval: float,
-        callback: Callable[[], Any | Coroutine[Any, Any, Any]]
+        self, name: str, interval: float, callback: Callable[[], Any | Coroutine[Any, Any, Any]]
     ) -> None:
         """注册周期任务
 
@@ -110,10 +111,7 @@ class Timer:
         return False
 
     def register_delay(
-        self,
-        name: str,
-        delay: float,
-        callback: Callable[[], Any | Coroutine[Any, Any, Any]]
+        self, name: str, delay: float, callback: Callable[[], Any | Coroutine[Any, Any, Any]]
     ) -> None:
         """注册延迟任务
 
@@ -222,29 +220,27 @@ class Timer:
         now = loop.time()
 
         # 执行周期任务
-        for task in list(self._interval_tasks.values()):
-            if now - task.last_run >= task.interval:
-                task.last_run = now
-                await self._execute_callback(task.name, task.callback)
+        for interval_task in list(self._interval_tasks.values()):
+            if now - interval_task.last_run >= interval_task.interval:
+                interval_task.last_run = now
+                await self._execute_callback(interval_task.name, interval_task.callback)
 
         # 执行到期的延迟任务
         triggered_names = []
-        for name, task in list(self._delay_tasks.items()):
-            if task.cancelled:
+        for name, delay_task in list(self._delay_tasks.items()):
+            if delay_task.cancelled:
                 triggered_names.append(name)
                 continue
-            if now >= task.trigger_at:
+            if now >= delay_task.trigger_at:
                 triggered_names.append(name)
-                await self._execute_callback(task.name, task.callback)
+                await self._execute_callback(delay_task.name, delay_task.callback)
 
         # 清理已触发的延迟任务
         for name in triggered_names:
             self._delay_tasks.pop(name, None)
 
     async def _execute_callback(
-        self,
-        name: str,
-        callback: Callable[[], Any | Coroutine[Any, Any, Any]]
+        self, name: str, callback: Callable[[], Any | Coroutine[Any, Any, Any]]
     ) -> None:
         """执行回调（带异常隔离）
 

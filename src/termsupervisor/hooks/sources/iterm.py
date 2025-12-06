@@ -11,9 +11,9 @@ from typing import TYPE_CHECKING
 
 import iterm2
 
-from ..sources.base import HookSource
 from ...config import FOCUS_DEBOUNCE_SECONDS
 from ...telemetry import get_logger
+from ..sources.base import HookSource
 
 if TYPE_CHECKING:
     from ..manager import HookManager
@@ -117,9 +117,7 @@ class ItermHookSource(HookSource):
         self._last_focus_session = session_id
 
         # 启动新的防抖任务
-        self._debounce_task = asyncio.create_task(
-            self._debounced_focus_event(session_id)
-        )
+        self._debounce_task = asyncio.create_task(self._debounced_focus_event(session_id))
 
     async def _debounced_focus_event(self, session_id: str) -> None:
         """防抖后发送 focus 事件

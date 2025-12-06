@@ -22,27 +22,23 @@ class ContentCleaner:
         (0x0030, 0x0039),  # 0-9
         (0x0041, 0x005A),  # A-Z
         (0x0061, 0x007A),  # a-z
-
         # === 拉丁扩展（带重音的字母）===
         (0x00C0, 0x00FF),  # Latin-1 补充 (À-ÿ，不含标点)
         (0x0100, 0x017F),  # Latin Extended-A
         (0x0180, 0x024F),  # Latin Extended-B
-
         # === 中文 ===
         (0x4E00, 0x9FFF),  # CJK 统一汉字 (基本区)
         (0x3400, 0x4DBF),  # CJK 统一汉字扩展 A
-
         # === 日语 ===
         (0x3040, 0x309F),  # 平假名
         (0x30A0, 0x30FF),  # 片假名
-
         # === 韩语 ===
         (0xAC00, 0xD7AF),  # 韩语音节块
         (0x1100, 0x11FF),  # 韩语字母 (Jamo)
     ]
 
     # 编译 ANSI 转义序列正则
-    _ANSI_PATTERN = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
+    _ANSI_PATTERN = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 
     @classmethod
     def is_allowed_char(cls, char: str) -> bool:
@@ -64,9 +60,9 @@ class ContentCleaner:
             清洗后的行（只包含文字）
         """
         # 1. 移除 ANSI 转义序列
-        line = cls._ANSI_PATTERN.sub('', line)
+        line = cls._ANSI_PATTERN.sub("", line)
         # 2. 白名单过滤（只保留文字）
-        return ''.join(c for c in line if cls.is_allowed_char(c))
+        return "".join(c for c in line if cls.is_allowed_char(c))
 
     @classmethod
     def clean_content(cls, content: str) -> list[str]:
@@ -79,7 +75,7 @@ class ContentCleaner:
             清洗后的非空行列表
         """
         lines = []
-        for line in content.split('\n'):
+        for line in content.split("\n"):
             cleaned = cls.clean_line(line)
             if cleaned:  # 跳过空行
                 lines.append(cleaned)
@@ -95,7 +91,7 @@ class ContentCleaner:
         Returns:
             清洗后的内容字符串（非空行用换行符连接）
         """
-        return '\n'.join(cls.clean_content(content))
+        return "\n".join(cls.clean_content(content))
 
     @classmethod
     def diff_lines(cls, old: str, new: str) -> tuple[int, list[str]]:
@@ -111,29 +107,29 @@ class ContentCleaner:
             - diff_details: unified diff 行列表
         """
         # 如果输入是原始内容，先清洗
-        old_lines = old.split('\n') if '\n' in old or not old else cls.clean_content(old)
-        new_lines = new.split('\n') if '\n' in new or not new else cls.clean_content(new)
+        old_lines = old.split("\n") if "\n" in old or not old else cls.clean_content(old)
+        new_lines = new.split("\n") if "\n" in new or not new else cls.clean_content(new)
 
         # 如果输入已经是清洗后的字符串，直接拆分
         if isinstance(old_lines, str):
-            old_lines = old_lines.split('\n')
+            old_lines = old_lines.split("\n")
         if isinstance(new_lines, str):
-            new_lines = new_lines.split('\n')
+            new_lines = new_lines.split("\n")
 
         # 过滤空字符串
-        old_lines = [l for l in old_lines if l]
-        new_lines = [l for l in new_lines if l]
+        old_lines = [line for line in old_lines if line]
+        new_lines = [line for line in new_lines if line]
 
         # 生成 unified diff
-        diff = list(unified_diff(old_lines, new_lines, lineterm=''))
+        diff = list(unified_diff(old_lines, new_lines, lineterm=""))
 
         # 统计变化行数（以 + 或 - 开头，但不是 +++ 或 ---）
         changed_lines = 0
         diff_details = []
         for line in diff:
-            if line.startswith('+++') or line.startswith('---'):
+            if line.startswith("+++") or line.startswith("---"):
                 continue
-            if line.startswith('+') or line.startswith('-'):
+            if line.startswith("+") or line.startswith("-"):
                 changed_lines += 1
                 diff_details.append(line)
 
@@ -150,4 +146,4 @@ class ContentCleaner:
             MD5 hash 字符串
         """
         cleaned = cls.clean_content_str(content)
-        return hashlib.md5(cleaned.encode('utf-8')).hexdigest()
+        return hashlib.md5(cleaned.encode("utf-8")).hexdigest()

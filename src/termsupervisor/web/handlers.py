@@ -8,8 +8,9 @@ JSON 格式：
 """
 
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Callable, Awaitable, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from fastapi import WebSocket
 
@@ -84,11 +85,9 @@ class MessageHandler:
             )
 
         success = await self.iterm_client.activate_session(session_id)
-        await websocket.send_json({
-            "type": "activate_result",
-            "session_id": session_id,
-            "success": success
-        })
+        await websocket.send_json(
+            {"type": "activate_result", "session_id": session_id, "success": success}
+        )
 
     async def _handle_rename_action(self, websocket: WebSocket, msg: dict):
         """处理重命名请求
@@ -96,12 +95,14 @@ class MessageHandler:
         JSON 格式: {"action": "rename", "type": "pane|tab|window", "id": "xxx", "name": "yyy"}
         """
         success = await self._handle_rename(msg)
-        await websocket.send_json({
-            "type": "rename_result",
-            "target_type": msg.get("type", ""),
-            "id": msg.get("id", ""),
-            "success": success
-        })
+        await websocket.send_json(
+            {
+                "type": "rename_result",
+                "target_type": msg.get("type", ""),
+                "id": msg.get("id", ""),
+                "success": success,
+            }
+        )
 
     async def _handle_create_tab_action(self, websocket: WebSocket, msg: dict):
         """处理创建 Tab 请求
@@ -109,17 +110,13 @@ class MessageHandler:
         JSON 格式: {"action": "create_tab", "window_id": "xxx", "layout": "single|split"}
         """
         success = await self._handle_create_tab(msg)
-        await websocket.send_json({
-            "type": "create_tab_result",
-            "window_id": msg.get("window_id", ""),
-            "success": success
-        })
+        await websocket.send_json(
+            {"type": "create_tab_result", "window_id": msg.get("window_id", ""), "success": success}
+        )
 
     async def _handle_rename(self, msg: dict) -> bool:
         """处理重命名请求"""
-        success = await self.iterm_client.rename_item(
-            msg["type"], msg["id"], msg["name"]
-        )
+        success = await self.iterm_client.rename_item(msg["type"], msg["id"], msg["name"])
         if success:
             await self.supervisor.check_updates()
             await self.broadcast(self.supervisor.get_layout_dict())
@@ -142,11 +139,13 @@ class MessageHandler:
         subscribe = msg.get("subscribe", True)
 
         if not self.web_server:
-            await websocket.send_json({
-                "type": "debug_subscribe_result",
-                "success": False,
-                "message": "WebServer not initialized",
-            })
+            await websocket.send_json(
+                {
+                    "type": "debug_subscribe_result",
+                    "success": False,
+                    "message": "WebServer not initialized",
+                }
+            )
             return
 
         if subscribe:
@@ -156,9 +155,11 @@ class MessageHandler:
             self.web_server.unsubscribe_debug(websocket)
             logger.info("[WS] Debug subscription disabled")
 
-        await websocket.send_json({
-            "type": "debug_subscribe_result",
-            "success": True,
-            "subscribed": subscribe,
-            "subscriber_count": self.web_server.debug_subscriber_count,
-        })
+        await websocket.send_json(
+            {
+                "type": "debug_subscribe_result",
+                "success": True,
+                "subscribed": subscribe,
+                "subscriber_count": self.web_server.debug_subscriber_count,
+            }
+        )

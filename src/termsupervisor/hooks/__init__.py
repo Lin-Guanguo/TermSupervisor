@@ -10,12 +10,11 @@
 """
 
 # 主模块
+# 统一类型（从 pane 模块重导出）
+from ..pane import HookEvent, TaskStatus
 from .manager import HookManager
 from .receiver import HookReceiver
 from .sources.base import HookSource
-
-# 统一类型（从 pane 模块重导出）
-from ..pane import TaskStatus, HookEvent
 
 __all__ = [
     # 主模块

@@ -8,28 +8,28 @@
 - pane: Pane 显示层
 """
 
-from .types import (
-    TaskStatus,
-    HookEvent,
-    StateChange,
-    StateHistoryEntry,
-    DisplayState,
-    StateSnapshot,
-    TransitionRule,
-)
+from .manager import StateManager
+from .pane import Pane
 from .predicates import (
     require_exit_code,
     require_exit_code_nonzero,
-    require_same_generation,
-    require_status_in,
     require_running_duration_gt,
-    require_state_id_at_least,
+    require_same_generation,
     require_source_match,
+    require_state_id_at_least,
+    require_status_in,
 )
-from .state_machine import PaneStateMachine
-from .pane import Pane
 from .queue import ActorQueue, EventQueue
-from .manager import StateManager
+from .state_machine import PaneStateMachine
+from .types import (
+    DisplayState,
+    HookEvent,
+    StateChange,
+    StateHistoryEntry,
+    StateSnapshot,
+    TaskStatus,
+    TransitionRule,
+)
 
 __all__ = [
     # Types

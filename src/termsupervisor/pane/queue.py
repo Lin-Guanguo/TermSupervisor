@@ -10,17 +10,18 @@
 """
 
 from collections import deque
-from typing import Generic, TypeVar, Callable, Any
+from collections.abc import Callable
+from typing import Any
 
-from ..telemetry import get_logger, metrics
 from ..config import (
-    QUEUE_MAX_SIZE,
+    LOW_PRIORITY_SIGNALS,
+    METRICS_ENABLED,
+    PROTECTED_SIGNALS,
     QUEUE_HIGH_WATERMARK,
     QUEUE_LOW_PRIORITY_DROP_WATERMARK,
-    LOW_PRIORITY_SIGNALS,
-    PROTECTED_SIGNALS,
-    METRICS_ENABLED,
+    QUEUE_MAX_SIZE,
 )
+from ..telemetry import get_logger, metrics
 from .types import HookEvent
 
 logger = get_logger(__name__)
@@ -28,10 +29,8 @@ logger = get_logger(__name__)
 # 调试事件回调类型
 OnQueueDebugEventCallback = Callable[[dict], Any]
 
-T = TypeVar("T")
 
-
-class ActorQueue(Generic[T]):
+class ActorQueue[T]:
     """Actor 队列
 
     每个 pane 一个队列，保证事件按顺序串行处理。
@@ -69,7 +68,7 @@ class ActorQueue(Generic[T]):
 
         # 检查是否需要丢弃
         if len(self._queue) >= self._max_size:
-            dropped = self._queue.popleft()
+            self._queue.popleft()
             logger.warning(f"[Queue:{pane_short}] Dropped oldest event (queue full)")
             if METRICS_ENABLED:
                 metrics.inc("queue.dropped", {"pane": pane_short})
@@ -202,16 +201,18 @@ class EventQueue(ActorQueue[HookEvent]):
         if not self._on_debug_event:
             return
 
-        self._on_debug_event({
-            "pane_id": self.pane_id,
-            "signal": signal,
-            "result": "ok",  # Normalized to match contract
-            "reason": reason,
-            "state_id": self._current_state_id,
-            "queue_depth": len(self._queue),
-            "queue_low_priority_drops": self._low_priority_drops,
-            "queue_overflow_drops": self._overflow_drops,
-        })
+        self._on_debug_event(
+            {
+                "pane_id": self.pane_id,
+                "signal": signal,
+                "result": "ok",  # Normalized to match contract
+                "reason": reason,
+                "state_id": self._current_state_id,
+                "queue_depth": len(self._queue),
+                "queue_low_priority_drops": self._low_priority_drops,
+                "queue_overflow_drops": self._overflow_drops,
+            }
+        )
 
     def set_current_generation(self, generation: int) -> None:
         """设置当前 generation"""
@@ -331,9 +332,7 @@ class EventQueue(ActorQueue[HookEvent]):
                 dropped = self._queue[i]
                 del self._queue[i]
                 self._overflow_drops += 1
-                logger.debug(
-                    f"[Queue:{pane_short}] Overflow: dropped normal {dropped.signal}"
-                )
+                logger.debug(f"[Queue:{pane_short}] Overflow: dropped normal {dropped.signal}")
                 if METRICS_ENABLED:
                     metrics.inc("queue.overflow_normal", {"pane": pane_short})
                 # 发送调试事件
@@ -401,10 +400,7 @@ class EventQueue(ActorQueue[HookEvent]):
                 metrics.inc("queue.content_merged", {"pane": pane_short}, merged)
                 logger.debug(f"[Queue:{pane_short}] Merged {merged} content events")
             # 发送调试事件
-            self._emit_debug_event(
-                "content.update",
-                f"merge_content_{merged}_events"
-            )
+            self._emit_debug_event("content.update", f"merge_content_{merged}_events")
 
         return merged
 

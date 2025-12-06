@@ -31,6 +31,7 @@ def _mask_tokens(text: str) -> str:
 @dataclass
 class JobMetadata:
     """Foreground job metadata from iTerm2 Shell Integration"""
+
     job_name: str = ""
     job_pid: int | None = None
     command_line: str = ""  # Redacted for logging
@@ -55,7 +56,7 @@ class ITerm2Client:
     def __init__(self, connection: iterm2.Connection):
         self.connection = connection
 
-    async def get_app(self) -> iterm2.App:
+    async def get_app(self) -> iterm2.App | None:
         """获取 iTerm2 App 实例"""
         return await iterm2.async_get_app(self.connection)
 
@@ -63,6 +64,8 @@ class ITerm2Client:
         """根据 session_id 获取 Session 对象"""
         try:
             app = await self.get_app()
+            if app is None:
+                return None
             return app.get_session_by_id(session_id)
         except Exception as e:
             print(f"[ITerm2Client] 获取 session {session_id} 失败: {e}")
@@ -72,6 +75,8 @@ class ITerm2Client:
         """激活指定的 session"""
         try:
             app = await self.get_app()
+            if app is None:
+                return False
             session = app.get_session_by_id(session_id)
             if session:
                 await session.async_activate()
@@ -85,6 +90,8 @@ class ITerm2Client:
         """重命名 Window"""
         try:
             app = await self.get_app()
+            if app is None:
+                return False
             for window in app.windows:
                 if window.window_id == window_id:
                     success = await set_window_name(window, new_name)
@@ -101,6 +108,8 @@ class ITerm2Client:
         """重命名 Tab"""
         try:
             app = await self.get_app()
+            if app is None:
+                return False
             for window in app.windows:
                 for tab in window.tabs:
                     if tab.tab_id == tab_id:
@@ -118,6 +127,8 @@ class ITerm2Client:
         """重命名 Session"""
         try:
             app = await self.get_app()
+            if app is None:
+                return False
             session = app.get_session_by_id(session_id)
             if session:
                 success = await set_session_name(session, new_name)
@@ -151,6 +162,8 @@ class ITerm2Client:
         """
         try:
             app = await self.get_app()
+            if app is None:
+                return False
             for window in app.windows:
                 if window.window_id == window_id:
                     tab = await window.async_create_tab()
@@ -221,7 +234,7 @@ class ITerm2Client:
                 session.async_get_variable("commandLine"),
                 session.async_get_variable("tty"),
                 session.async_get_variable("path"),
-                return_exceptions=True
+                return_exceptions=True,
             )
             job_name, job_pid, cmd_line, tty, path = results
 
@@ -233,9 +246,7 @@ class ITerm2Client:
 
             # Cast jobPid to int
             job_pid_int: int | None = None
-            if isinstance(job_pid, (int, float)):
-                job_pid_int = int(job_pid)
-            elif isinstance(job_pid, str) and job_pid.isdigit():
+            if isinstance(job_pid, (int, float)) or isinstance(job_pid, str) and job_pid.isdigit():
                 job_pid_int = int(job_pid)
 
             return JobMetadata(
@@ -243,7 +254,7 @@ class ITerm2Client:
                 job_pid=job_pid_int,
                 command_line=cmd_line_str,
                 tty=tty_str,
-                path=path_str
+                path=path_str,
             )
         except Exception:
             return JobMetadata()

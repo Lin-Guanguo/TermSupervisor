@@ -14,12 +14,14 @@ Sources 通过 emit_event 发送事件，Manager 负责：
 """
 
 import logging
+from collections.abc import Callable
 from datetime import datetime
-from typing import Callable, Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from ..telemetry import get_logger, metrics
-from ..pane import TaskStatus, HookEvent, StateManager, DisplayState
+from ..analysis.heuristic import Heuristic
 from ..config import METRICS_ENABLED
+from ..pane import DisplayState, HookEvent, StateManager, TaskStatus
+from ..telemetry import get_logger, metrics
 
 if TYPE_CHECKING:
     from ..timer import Timer
@@ -65,8 +67,29 @@ class HookManager:
         self._state_manager = state_manager or StateManager(timer=timer)
         self._on_change: StatusChangeCallback | None = None
 
+        # Heuristic analyzer for keyword-gated content detection
+        self._heuristic: Heuristic = Heuristic()
+        self._heuristic.set_emit_callback(self._heuristic_emit_callback)
+
         # 绑定内部回调
         self._state_manager.set_on_display_change(self._on_display_change)
+
+    async def _heuristic_emit_callback(
+        self,
+        source: str,
+        pane_id: str,
+        event_type: str,
+        data: dict[str, Any],
+        log: bool,
+    ) -> bool:
+        """Callback for Heuristic to emit events through HookManager"""
+        return await self.emit_event(
+            source=source,
+            pane_id=pane_id,
+            event_type=event_type,
+            data=data,
+            log=log,
+        )
 
     # === 配置 ===
 
@@ -97,11 +120,7 @@ class HookManager:
         self._state_manager.set_on_debug_event(callback)
 
     def _on_display_change(
-        self,
-        pane_id: str,
-        display_state: DisplayState,
-        suppressed: bool,
-        reason: str
+        self, pane_id: str, display_state: DisplayState, suppressed: bool, reason: str
     ) -> None:
         """内部显示变化回调"""
         if self._on_change:
@@ -196,6 +215,11 @@ class HookManager:
         """
         # 1. 规范化事件
         event = self._normalize_event(source, pane_id, event_type, data)
+
+        # 1.5. Route external exit signals to heuristic analyzer
+        signal = f"{source}.{event_type}"
+        if signal in ("iterm.session_end", "frontend.close_pane", "content.exit"):
+            self._heuristic.handle_exit_signal(signal, pane_id, data or {})
 
         # 2. 可选日志
         if log:
@@ -412,15 +436,15 @@ class HookManager:
         for pane_id in list(self._state_manager.get_all_panes()):
             self.remove_pane(pane_id)
 
-    # === 持久化 ===
+    # === 持久化 (TODO: implement in StateManager) ===
 
     def save(self) -> bool:
-        """保存状态"""
-        return self._state_manager.save()
+        """保存状态 (not implemented)"""
+        return False
 
     def load(self) -> bool:
-        """加载状态"""
-        return self._state_manager.load()
+        """加载状态 (not implemented)"""
+        return False
 
     # === 调试 ===
 

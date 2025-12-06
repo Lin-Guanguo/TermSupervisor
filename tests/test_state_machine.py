@@ -4,8 +4,6 @@
 此文件保留 TaskStatus 属性测试。
 """
 
-import pytest
-
 from termsupervisor.pane import TaskStatus
 
 

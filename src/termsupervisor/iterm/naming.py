@@ -5,14 +5,12 @@
 设置时同时更新 USER 变量和 iTerm2 内置属性。
 """
 
-from typing import Union
-
 import iterm2
 
 from termsupervisor import config
 
-
 # ==================== 获取名称 ====================
+
 
 async def get_session_name(session: iterm2.Session, default: str = "") -> str:
     """获取 Session 名称
@@ -77,7 +75,7 @@ async def get_window_name(window: iterm2.Window, default: str = "") -> str:
     return default
 
 
-async def get_name(obj: Union[iterm2.Session, iterm2.Tab, iterm2.Window], default: str = "") -> str:
+async def get_name(obj: iterm2.Session | iterm2.Tab | iterm2.Window, default: str = "") -> str:
     """获取对象名称（通用接口）
 
     根据对象类型调用对应的获取函数。
@@ -92,6 +90,7 @@ async def get_name(obj: Union[iterm2.Session, iterm2.Tab, iterm2.Window], defaul
 
 
 # ==================== 设置名称 ====================
+
 
 async def set_session_name(session: iterm2.Session, name: str) -> bool:
     """设置 Session 名称
@@ -134,7 +133,7 @@ async def set_window_name(window: iterm2.Window, name: str) -> bool:
         return False
 
 
-async def set_name(obj: Union[iterm2.Session, iterm2.Tab, iterm2.Window], name: str) -> bool:
+async def set_name(obj: iterm2.Session | iterm2.Tab | iterm2.Window, name: str) -> bool:
     """设置对象名称（通用接口）
 
     根据对象类型调用对应的设置函数。

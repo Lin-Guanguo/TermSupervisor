@@ -37,7 +37,11 @@ QUEUE_MAX_SIZE = 256  # 队列最大长度
 QUEUE_HIGH_WATERMARK = 0.75  # 高水位阈值（打印 debug 日志）
 QUEUE_LOW_PRIORITY_DROP_WATERMARK = 0.80  # 低优先级事件丢弃水位
 LOW_PRIORITY_SIGNALS = {"content.changed", "content.update"}  # 低优先级信号
-PROTECTED_SIGNALS = {"shell.command_end", "claude-code.Stop", "claude-code.SessionEnd"}  # 不可丢弃信号
+PROTECTED_SIGNALS = {
+    "shell.command_end",
+    "claude-code.Stop",
+    "claude-code.SessionEnd",
+}  # 不可丢弃信号
 
 # === Timer 配置 ===
 TIMER_TICK_INTERVAL = 1.0  # Timer tick 间隔（秒）
@@ -74,96 +78,69 @@ MASK_COMMANDS = False  # 是否完全隐藏命令内容（隐私模式）
 # === 指标配置 ===
 METRICS_ENABLED = True  # 是否启用指标收集
 
-# === 内容启发式配置 ===
-# Feature toggle
-CONTENT_HEURISTIC_ENABLED = False  # Master switch for content heuristics
-
-# Pane whitelist (only run heuristics for these process/title patterns)
-CONTENT_HEURISTIC_PANE_WHITELIST = {"gemini", "codex", "copilot"}
-
-# Job whitelist (for jobName-based gating; defaults to same as pane whitelist)
-CONTENT_HEURISTIC_JOB_WHITELIST = {"gemini", "codex", "copilot", "python", "node"}
-
-# Prefer jobName over title when both are available
-CONTENT_HEURISTIC_PREFER_JOB_NAME = True
-
+# === 通用配置 ===
 # Command line redaction: max length before truncation
 COMMAND_LINE_MAX_LENGTH = 50
 
-# Prompt silence gate: heuristics only activate when PromptMonitor has been
-# silent for this duration (seconds); prevents double-firing with shell hooks
-CONTENT_T_PROMPT_SILENCE = 5.0
+# === Content Heuristic 配置 ===
+# Entry keyword: non-empty string enables heuristic mode; empty disables
+CONTENT_HEURISTIC_KEYWORD = ""  # e.g., "go/heuristic" or "claude-code"
 
-# Quiet thresholds for signal detection (seconds)
-CONTENT_T_QUIET_DONE = 2.0   # Quiet time before heuristic_done
-CONTENT_T_QUIET_IDLE = 5.0   # Quiet time before heuristic_idle
-CONTENT_T_QUIET_WAIT = 1.0   # Quiet time before heuristic_wait
+# Optional exit keyword (empty => disabled)
+CONTENT_HEURISTIC_EXIT_KEYWORD = ""
 
-# Debounce and re-emit
-CONTENT_HEURISTIC_DEBOUNCE_SEC = 1.0     # Per-signal debounce window
-CONTENT_HEURISTIC_REEMIT_IDLE_SEC = 30.0  # Periodic idle re-emit interval
+# Optional exit timeout in seconds (0 => no auto-exit)
+CONTENT_HEURISTIC_EXIT_TIMEOUT_SECONDS = 0
 
-# Newline/burst gate for heuristic_run
-CONTENT_HEURISTIC_MIN_NEWLINES = 1       # Min newline increase to trigger run
-CONTENT_HEURISTIC_MIN_BURST_CHARS = 50   # Alternative: burst length threshold
+# Default cooldown for pattern detectors (seconds)
+CONTENT_HEURISTIC_COOLDOWN_SECONDS = 2.0
 
-# Regex patterns (maintain here; add new anchors centrally)
-# Prompt anchors: shell prompts, REPL prompts (>>>, In[n]:, Pdb, Gemini>)
-CONTENT_PROMPT_ANCHOR_REGEX = (
-    r"(?:[$#%>] |❯|➜|>>>|\.\.\.|\(Pdb\)|In \[\d+\]:|[A-Za-z]+> )\s*$"
-)
+# Resource guard: max lines to scan for heuristic patterns
+CONTENT_HEURISTIC_MAX_SCAN_LINES = 200
 
-# Interactivity patterns: y/n prompts, questions, press-to-continue
-CONTENT_INTERACTIVITY_REGEX = (
-    r"(?:\([yY]/[nN]\)|\[[yY]/[nN]\]|\?\s*$|:\s*$"
-    r"|Press .* to .*|Press Enter to continue\.?\s*$|Select.*:\s*$)"
-)
+# Keyword signal mapping: {keyword: {on_appear, on_disappear}}
+# Used for keyword presence tracking and RUNNING/DONE status
+# Example: {"thinking": {"on_appear": "content.thinking", "on_disappear": "content.thinking_done"}}
+CONTENT_HEURISTIC_KEYWORDS: dict[str, dict[str, str]] = {}
 
-# Spinner patterns (progress indicators)
-CONTENT_SPINNER_PATTERNS = [
-    r"\.{3,}$",           # Trailing ellipsis
-    r"[|/\\-]$",          # Spinner chars at end
-    r"\d+%",              # Percentage
-    r"ETA",               # ETA indicator
-    r"MB/s|KB/s",         # Transfer rate
-    r"⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏",  # Braille spinner
+# Pattern detectors: list of pattern definitions
+# Each pattern has: name, regex, signal, guards (optional), target_group (optional), cooldown (optional)
+# Patterns are evaluated in order; first match on a line wins (use for priority)
+# Empty list disables pattern detection
+CONTENT_HEURISTIC_PATTERNS: list[dict[str, object]] = [
+    {
+        "name": "esc_to",
+        "regex": r"\besc to ([\w./:-]{1,64})\b",
+        "regex_flags": ["IGNORECASE"],
+        "signal": "heuristic_esc_to",
+        "target_group": 1,  # Capture group for target extraction
+        "target_strip": ".,;:!?",  # Characters to strip from target
+        "guards": [  # Lines matching any guard are skipped
+            r"\b(class|def|function|const|let|var)\b",
+            r"[{}();]",
+            r"\bescape_to\b",
+            r"^```|`[^`]+`",
+        ],
+        "cooldown": 2.0,
+    },
+    {
+        "name": "1yes",
+        "regex": r"^1\s*yes",
+        "regex_flags": ["IGNORECASE", "MULTILINE"],
+        "signal": "heuristic_1yes",
+        "target": "approval",  # Fixed target value (no capture group)
+        "guards": [
+            r"\b(class|def|function|const|let|var)\b",
+            r"[{}();]",
+            r"\bescape_to\b",
+            r"^```|`[^`]+`",
+            # Additional 1yes-specific guards
+            r"\b(case|switch|enum|return)\b",
+            r"^-\s+1\s*yes",
+        ],
+        "cooldown": 2.0,
+    },
 ]
-
-# Completion tokens for heuristic_done
-CONTENT_COMPLETION_TOKENS = [
-    "done", "finished", "success", "complete", "completed",
-    "exit code 0", "ready", "applied", "updated",
-]
-
-# Negative patterns: suppress heuristics when these appear (e.g., spinners ending with >)
-CONTENT_NEGATIVE_PATTERNS = [
-    r"⠋>|⠙>|⠹>|⠸>|⠼>|⠴>|⠦>|⠧>|⠇>|⠏>",  # Spinner followed by prompt-like char
-]
-
-# === Stage 2: Keyword-driven transitions ===
-# Interrupt patterns: presence triggers RUNNING, disappearance (with quiet/anchor) triggers DONE
-CONTENT_INTERRUPT_PATTERNS = [
-    r"esc to interrupt",
-    r"esc to cancel",
-    r"press esc to stop",
-]
-
-# Approval patterns: presence triggers WAITING_APPROVAL
-CONTENT_APPROVAL_PATTERNS = [
-    r"1\.\s*Yes",              # "1. Yes" menu option
-    r"1\.\s*Yes,?\s*allow",    # "1. Yes, allow once" variant
-    r"\[Y\]es",                # "[Y]es" prompt
-]
-
-# Optional: separate quiet threshold for interrupt disappearance
-# (defaults to CONTENT_T_QUIET_DONE if not set)
-CONTENT_T_INTERRUPT_DONE = CONTENT_T_QUIET_DONE
-
-# Legacy config aliases (deprecated, kept for backward compatibility)
-HEURISTICS_ENABLED = CONTENT_HEURISTIC_ENABLED
-HEURISTICS_ALLOWED_SOURCES = CONTENT_HEURISTIC_PANE_WHITELIST
-HEURISTICS_IDLE_TIMEOUT_SECONDS = CONTENT_T_QUIET_IDLE
-HEURISTICS_MIN_ACTIVITY_LINES = 3  # Not used in new system
 
 # 旧配置别名
 INTERVAL = POLL_INTERVAL

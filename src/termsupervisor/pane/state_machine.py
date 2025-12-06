@@ -10,16 +10,16 @@ import itertools
 from collections import deque
 from datetime import datetime
 
-from ..telemetry import get_logger, metrics
 from ..config import STATE_HISTORY_MAX_LENGTH
+from ..telemetry import get_logger, metrics
+from .transitions import find_matching_rules
 from .types import (
-    TaskStatus,
     HookEvent,
     StateChange,
     StateHistoryEntry,
     StateSnapshot,
+    TaskStatus,
 )
-from .transitions import find_matching_rules
 
 logger = get_logger(__name__)
 
@@ -186,6 +186,7 @@ class PaneStateMachine:
         if signal == "claude-code.PreToolUse" and old_source == "claude-code":
             should_reset_started_at = False
 
+        new_started_at: float | None
         if should_reset_started_at:
             new_started_at = datetime.now().timestamp()
         else:

@@ -8,21 +8,21 @@
 - 清理过期 pane
 """
 
-import asyncio
+from collections.abc import Callable
 from datetime import datetime
-from typing import Callable, Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from ..telemetry import get_logger, metrics
 from ..config import (
     LONG_RUNNING_THRESHOLD_SECONDS,
     WAITING_FALLBACK_TIMEOUT_SECONDS,
     WAITING_FALLBACK_TO_RUNNING,
 )
 from ..iterm.utils import normalize_session_id
-from .types import TaskStatus, HookEvent, StateChange, DisplayState
-from .state_machine import PaneStateMachine
+from ..telemetry import get_logger, metrics
 from .pane import Pane
 from .queue import EventQueue
+from .state_machine import PaneStateMachine
+from .types import DisplayState, HookEvent, TaskStatus
 
 if TYPE_CHECKING:
     from ..timer import Timer
@@ -137,9 +137,7 @@ class StateManager:
         )
 
         # 绑定回调：Pane → 外部（保留，用于通知 HookManager/Web）
-        pane.set_on_display_change(
-            lambda state: self._on_pane_display_change(pane_id, state)
-        )
+        pane.set_on_display_change(lambda state: self._on_pane_display_change(pane_id, state))
 
         # 创建队列
         queue = EventQueue(pane_id)
@@ -195,16 +193,18 @@ class StateManager:
             queue_low_priority_drops = queue.low_priority_drops
             queue_overflow_drops = queue.overflow_drops
 
-        self._on_debug_event({
-            "pane_id": pane_id,
-            "signal": signal,
-            "result": result,
-            "reason": reason,
-            "state_id": state_id,
-            "queue_depth": queue_depth,
-            "queue_low_priority_drops": queue_low_priority_drops,
-            "queue_overflow_drops": queue_overflow_drops,
-        })
+        self._on_debug_event(
+            {
+                "pane_id": pane_id,
+                "signal": signal,
+                "result": result,
+                "reason": reason,
+                "state_id": state_id,
+                "queue_depth": queue_depth,
+                "queue_low_priority_drops": queue_low_priority_drops,
+                "queue_overflow_drops": queue_overflow_drops,
+            }
+        )
 
     # === 事件处理 ===
 
@@ -309,16 +309,12 @@ class StateManager:
                     if queue:
                         queue.set_current_state_id(machine.state_id)
                     # 发送调试事件
-                    self._emit_debug_event(
-                        pane_id, event.signal, "ok",
-                        state_id=machine.state_id
-                    )
+                    self._emit_debug_event(pane_id, event.signal, "ok", state_id=machine.state_id)
                 else:
                     # 获取失败原因
                     reason = self._get_last_fail_reason(machine)
                     self._emit_debug_event(
-                        pane_id, event.signal, "fail",
-                        reason=reason, state_id=machine.state_id
+                        pane_id, event.signal, "fail", reason=reason, state_id=machine.state_id
                     )
                 return change is not None
 
@@ -351,16 +347,12 @@ class StateManager:
                 queue.set_current_state_id(machine.state_id)
 
             # 发送调试事件
-            self._emit_debug_event(
-                pane_id, event.signal, "ok",
-                state_id=machine.state_id
-            )
+            self._emit_debug_event(pane_id, event.signal, "ok", state_id=machine.state_id)
         else:
             # 获取失败原因
             reason = self._get_last_fail_reason(machine)
             self._emit_debug_event(
-                pane_id, event.signal, "fail",
-                reason=reason, state_id=machine.state_id
+                pane_id, event.signal, "fail", reason=reason, state_id=machine.state_id
             )
 
         return change is not None
@@ -412,10 +404,7 @@ class StateManager:
                     if queue:
                         queue.set_current_state_id(machine.state_id)
                     # 发送调试事件
-                    self._emit_debug_event(
-                        pane_id, event.signal, "ok",
-                        state_id=machine.state_id
-                    )
+                    self._emit_debug_event(pane_id, event.signal, "ok", state_id=machine.state_id)
 
         # 检查 WAITING fallback 超时
         self._check_waiting_fallback()
@@ -500,10 +489,7 @@ class StateManager:
                     queue.set_current_state_id(machine.state_id)
 
                 # 发送调试事件
-                self._emit_debug_event(
-                    pane_id, event.signal, "ok",
-                    state_id=machine.state_id
-                )
+                self._emit_debug_event(pane_id, event.signal, "ok", state_id=machine.state_id)
             else:
                 logger.warning(
                     f"[StateManager:{pane_short}] WAITING fallback failed: "
@@ -512,8 +498,7 @@ class StateManager:
                 # 发送失败调试事件
                 fail_reason = self._get_last_fail_reason(machine)
                 self._emit_debug_event(
-                    pane_id, event.signal, "fail",
-                    reason=fail_reason, state_id=machine.state_id
+                    pane_id, event.signal, "fail", reason=fail_reason, state_id=machine.state_id
                 )
 
             to_remove.append(pane_id)
@@ -674,18 +659,20 @@ class StateManager:
                 entry = history[-1]
                 latest_history = entry.to_dict()
 
-            snapshots.append({
-                "pane_id": pane_id,
-                "status": machine.status.value,
-                "source": machine.source,
-                "state_id": machine.state_id,
-                "description": machine.description,
-                "running_duration": display.get("running_duration", 0.0),
-                "queue_depth": queue_info.get("depth", 0),
-                "queue_low_priority_drops": queue_info.get("low_priority_drops", 0),
-                "queue_overflow_drops": queue_info.get("overflow_drops", 0),
-                "latest_history": latest_history,
-            })
+            snapshots.append(
+                {
+                    "pane_id": pane_id,
+                    "status": machine.status.value,
+                    "source": machine.source,
+                    "state_id": machine.state_id,
+                    "description": machine.description,
+                    "running_duration": display.get("running_duration", 0.0),
+                    "queue_depth": queue_info.get("depth", 0),
+                    "queue_low_priority_drops": queue_info.get("low_priority_drops", 0),
+                    "queue_overflow_drops": queue_info.get("overflow_drops", 0),
+                    "latest_history": latest_history,
+                }
+            )
 
         return snapshots, total
 

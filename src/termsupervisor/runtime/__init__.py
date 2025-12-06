@@ -1,8 +1,8 @@
 """Runtime module - Bootstrap and lifecycle management"""
 
 from .bootstrap import (
-    bootstrap,
     RuntimeComponents,
+    bootstrap,
 )
 
 __all__ = [

@@ -1,17 +1,16 @@
 """StateManager 测试"""
 
 import asyncio
+
 import pytest
-import tempfile
-from pathlib import Path
 
 from termsupervisor.pane import (
-    TaskStatus,
     HookEvent,
     StateManager,
+    TaskStatus,
 )
-from termsupervisor.timer import Timer
 from termsupervisor.telemetry import metrics
+from termsupervisor.timer import Timer
 
 
 @pytest.fixture
@@ -149,21 +148,25 @@ class TestEventProcessing:
     async def test_content_update_fallback_waiting_to_running(self, manager):
         """content.update 在 WAITING 时触发兜底恢复"""
         # 先进入 WAITING 状态
-        manager.enqueue(HookEvent(
-            source="claude-code",
-            pane_id="test-pane",
-            event_type="Notification:permission_prompt",
-        ))
+        manager.enqueue(
+            HookEvent(
+                source="claude-code",
+                pane_id="test-pane",
+                event_type="Notification:permission_prompt",
+            )
+        )
         await manager.process_queued()
         assert manager.get_status("test-pane") == TaskStatus.WAITING_APPROVAL
 
         # content.update 应该触发兜底恢复
-        manager.enqueue(HookEvent(
-            source="content",
-            pane_id="test-pane",
-            event_type="update",
-            data={"content": "output"},
-        ))
+        manager.enqueue(
+            HookEvent(
+                source="content",
+                pane_id="test-pane",
+                event_type="update",
+                data={"content": "output"},
+            )
+        )
         await manager.process_queued()
 
         assert manager.get_status("test-pane") == TaskStatus.RUNNING
@@ -175,24 +178,29 @@ class TestLongRunningCheck:
     def test_tick_all_triggers_long_running(self, manager):
         """tick_all 触发 LONG_RUNNING"""
         # 创建 pane 并进入 RUNNING
-        manager.enqueue(HookEvent(
-            source="shell",
-            pane_id="test-pane",
-            event_type="command_start",
-            data={"command": "sleep 100"},
-        ))
+        manager.enqueue(
+            HookEvent(
+                source="shell",
+                pane_id="test-pane",
+                event_type="command_start",
+                data={"command": "sleep 100"},
+            )
+        )
         # 直接处理（同步）
         machine = manager.get_machine("test-pane")
-        machine.process(HookEvent(
-            source="shell",
-            pane_id="test-pane",
-            event_type="command_start",
-            data={"command": "sleep 100"},
-            pane_generation=machine.pane_generation,
-        ))
+        machine.process(
+            HookEvent(
+                source="shell",
+                pane_id="test-pane",
+                event_type="command_start",
+                data={"command": "sleep 100"},
+                pane_generation=machine.pane_generation,
+            )
+        )
 
         # 手动设置 started_at 到过去
         import time
+
         machine._started_at = time.time() - 100  # 100秒前
 
         # tick_all 应该触发
@@ -210,20 +218,24 @@ class TestCallbacks:
         changes = []
 
         def callback(pane_id, display_state, suppressed, reason):
-            changes.append({
-                "pane_id": pane_id,
-                "status": display_state.status,
-                "suppressed": suppressed,
-            })
+            changes.append(
+                {
+                    "pane_id": pane_id,
+                    "status": display_state.status,
+                    "suppressed": suppressed,
+                }
+            )
 
         manager.set_on_display_change(callback)
 
-        manager.enqueue(HookEvent(
-            source="shell",
-            pane_id="test-pane",
-            event_type="command_start",
-            data={"command": "ls"},
-        ))
+        manager.enqueue(
+            HookEvent(
+                source="shell",
+                pane_id="test-pane",
+                event_type="command_start",
+                data={"command": "ls"},
+            )
+        )
         await manager.process_queued()
 
         assert len(changes) == 1
@@ -250,12 +262,14 @@ class TestQueueBehavior:
         """队列串行化事件"""
         # 入队多个事件
         for i in range(5):
-            manager.enqueue(HookEvent(
-                source="shell",
-                pane_id="test-pane",
-                event_type="command_start" if i % 2 == 0 else "command_end",
-                data={"command": f"cmd{i}"} if i % 2 == 0 else {"exit_code": 0},
-            ))
+            manager.enqueue(
+                HookEvent(
+                    source="shell",
+                    pane_id="test-pane",
+                    event_type="command_start" if i % 2 == 0 else "command_end",
+                    data={"command": f"cmd{i}"} if i % 2 == 0 else {"exit_code": 0},
+                )
+            )
 
         # 处理所有
         count = await manager.process_queued()
@@ -267,11 +281,13 @@ class TestWaitingFallback:
 
     async def test_waiting_fallback_tracks_entry(self, manager):
         """进入 WAITING 状态时记录 fallback 信息"""
-        manager.enqueue(HookEvent(
-            source="claude-code",
-            pane_id="test-pane",
-            event_type="Notification:permission_prompt",
-        ))
+        manager.enqueue(
+            HookEvent(
+                source="claude-code",
+                pane_id="test-pane",
+                event_type="Notification:permission_prompt",
+            )
+        )
         await manager.process_queued()
 
         assert manager.get_status("test-pane") == TaskStatus.WAITING_APPROVAL
@@ -280,21 +296,25 @@ class TestWaitingFallback:
     async def test_waiting_fallback_cleared_on_resume(self, manager):
         """WAITING 恢复后清除 fallback 跟踪"""
         # 进入 WAITING
-        manager.enqueue(HookEvent(
-            source="claude-code",
-            pane_id="test-pane",
-            event_type="Notification:permission_prompt",
-        ))
+        manager.enqueue(
+            HookEvent(
+                source="claude-code",
+                pane_id="test-pane",
+                event_type="Notification:permission_prompt",
+            )
+        )
         await manager.process_queued()
         assert "test-pane" in manager._waiting_fallback
 
         # content 恢复
-        manager.enqueue(HookEvent(
-            source="content",
-            pane_id="test-pane",
-            event_type="update",
-            data={"content": "output"},
-        ))
+        manager.enqueue(
+            HookEvent(
+                source="content",
+                pane_id="test-pane",
+                event_type="update",
+                data={"content": "output"},
+            )
+        )
         await manager.process_queued()
 
         assert "test-pane" not in manager._waiting_fallback
@@ -302,34 +322,39 @@ class TestWaitingFallback:
     async def test_waiting_fallback_cleared_on_user_action(self, manager):
         """用户操作清除 WAITING 后，fallback 跟踪也清除"""
         # 进入 WAITING
-        manager.enqueue(HookEvent(
-            source="claude-code",
-            pane_id="test-pane",
-            event_type="Notification:permission_prompt",
-        ))
+        manager.enqueue(
+            HookEvent(
+                source="claude-code",
+                pane_id="test-pane",
+                event_type="Notification:permission_prompt",
+            )
+        )
         await manager.process_queued()
         assert "test-pane" in manager._waiting_fallback
 
         # 用户 focus 清除
-        manager.enqueue(HookEvent(
-            source="iterm",
-            pane_id="test-pane",
-            event_type="focus",
-        ))
+        manager.enqueue(
+            HookEvent(
+                source="iterm",
+                pane_id="test-pane",
+                event_type="focus",
+            )
+        )
         await manager.process_queued()
 
         assert "test-pane" not in manager._waiting_fallback
 
     def test_waiting_fallback_marks_content_change(self, manager):
         """WAITING 状态下内容变化标记 has_content"""
-        import asyncio
 
         # 进入 WAITING
-        manager.enqueue(HookEvent(
-            source="claude-code",
-            pane_id="test-pane",
-            event_type="Notification:permission_prompt",
-        ))
+        manager.enqueue(
+            HookEvent(
+                source="claude-code",
+                pane_id="test-pane",
+                event_type="Notification:permission_prompt",
+            )
+        )
         asyncio.get_event_loop().run_until_complete(manager.process_queued())
 
         # 确认初始状态
@@ -338,12 +363,14 @@ class TestWaitingFallback:
 
         # 内容变化会直接恢复，但如果状态机没有规则，会标记 has_content
         # 这里我们验证恢复逻辑正常工作
-        manager.enqueue(HookEvent(
-            source="content",
-            pane_id="test-pane",
-            event_type="update",
-            data={"content": "output"},
-        ))
+        manager.enqueue(
+            HookEvent(
+                source="content",
+                pane_id="test-pane",
+                event_type="update",
+                data={"content": "output"},
+            )
+        )
         asyncio.get_event_loop().run_until_complete(manager.process_queued())
 
         # 恢复后 fallback 被清除
@@ -356,28 +383,31 @@ class TestQueuePriority:
     def test_low_priority_dropped_at_high_watermark(self, manager):
         """低优先级事件在高水位时被丢弃"""
         from termsupervisor.pane.queue import EventQueue
-        from termsupervisor.config import QUEUE_LOW_PRIORITY_DROP_WATERMARK
 
         queue = EventQueue("test-pane", max_size=10)
 
         # 填充到高水位以上（80% = 8个）
         for i in range(9):
-            queue.enqueue_event(HookEvent(
-                source="shell",
-                pane_id="test-pane",
-                event_type="command_start",
-                data={"command": f"cmd{i}"},
-                pane_generation=1,
-            ))
+            queue.enqueue_event(
+                HookEvent(
+                    source="shell",
+                    pane_id="test-pane",
+                    event_type="command_start",
+                    data={"command": f"cmd{i}"},
+                    pane_generation=1,
+                )
+            )
 
         # 低优先级事件应该被丢弃
-        result = queue.enqueue_event(HookEvent(
-            source="content",
-            pane_id="test-pane",
-            event_type="changed",
-            data={"content": "test"},
-            pane_generation=1,
-        ))
+        result = queue.enqueue_event(
+            HookEvent(
+                source="content",
+                pane_id="test-pane",
+                event_type="changed",
+                data={"content": "test"},
+                pane_generation=1,
+            )
+        )
 
         assert result is False
         assert queue.low_priority_drops == 1
@@ -390,22 +420,26 @@ class TestQueuePriority:
 
         # 填充到高水位以上
         for i in range(9):
-            queue.enqueue_event(HookEvent(
-                source="shell",
-                pane_id="test-pane",
-                event_type="command_start",
-                data={"command": f"cmd{i}"},
-                pane_generation=1,
-            ))
+            queue.enqueue_event(
+                HookEvent(
+                    source="shell",
+                    pane_id="test-pane",
+                    event_type="command_start",
+                    data={"command": f"cmd{i}"},
+                    pane_generation=1,
+                )
+            )
 
         # 受保护信号应该成功入队
-        result = queue.enqueue_event(HookEvent(
-            source="shell",
-            pane_id="test-pane",
-            event_type="command_end",
-            data={"exit_code": 0},
-            pane_generation=1,
-        ))
+        result = queue.enqueue_event(
+            HookEvent(
+                source="shell",
+                pane_id="test-pane",
+                event_type="command_end",
+                data={"exit_code": 0},
+                pane_generation=1,
+            )
+        )
 
         assert result is True
 
@@ -417,22 +451,26 @@ class TestQueuePriority:
 
         # 只填充少量（低于水位）
         for i in range(5):
-            queue.enqueue_event(HookEvent(
-                source="shell",
-                pane_id="test-pane",
-                event_type="command_start",
-                data={"command": f"cmd{i}"},
-                pane_generation=1,
-            ))
+            queue.enqueue_event(
+                HookEvent(
+                    source="shell",
+                    pane_id="test-pane",
+                    event_type="command_start",
+                    data={"command": f"cmd{i}"},
+                    pane_generation=1,
+                )
+            )
 
         # 低优先级事件应该成功入队
-        result = queue.enqueue_event(HookEvent(
-            source="content",
-            pane_id="test-pane",
-            event_type="changed",
-            data={"content": "test"},
-            pane_generation=1,
-        ))
+        result = queue.enqueue_event(
+            HookEvent(
+                source="content",
+                pane_id="test-pane",
+                event_type="changed",
+                data={"content": "test"},
+                pane_generation=1,
+            )
+        )
 
         assert result is True
         assert queue.low_priority_drops == 0
@@ -444,34 +482,42 @@ class TestQueuePriority:
         queue = EventQueue("test-pane", max_size=10)
 
         # 入队多个 content 事件（中间夹杂其他事件）
-        queue.enqueue_event(HookEvent(
-            source="content",
-            pane_id="test-pane",
-            event_type="changed",
-            data={"content": "content1"},
-            pane_generation=1,
-        ))
-        queue.enqueue_event(HookEvent(
-            source="content",
-            pane_id="test-pane",
-            event_type="changed",
-            data={"content": "content2"},
-            pane_generation=1,
-        ))
-        queue.enqueue_event(HookEvent(
-            source="shell",
-            pane_id="test-pane",
-            event_type="command_start",
-            data={"command": "ls"},
-            pane_generation=1,
-        ))
-        queue.enqueue_event(HookEvent(
-            source="content",
-            pane_id="test-pane",
-            event_type="changed",
-            data={"content": "content3"},
-            pane_generation=1,
-        ))
+        queue.enqueue_event(
+            HookEvent(
+                source="content",
+                pane_id="test-pane",
+                event_type="changed",
+                data={"content": "content1"},
+                pane_generation=1,
+            )
+        )
+        queue.enqueue_event(
+            HookEvent(
+                source="content",
+                pane_id="test-pane",
+                event_type="changed",
+                data={"content": "content2"},
+                pane_generation=1,
+            )
+        )
+        queue.enqueue_event(
+            HookEvent(
+                source="shell",
+                pane_id="test-pane",
+                event_type="command_start",
+                data={"command": "ls"},
+                pane_generation=1,
+            )
+        )
+        queue.enqueue_event(
+            HookEvent(
+                source="content",
+                pane_id="test-pane",
+                event_type="changed",
+                data={"content": "content3"},
+                pane_generation=1,
+            )
+        )
 
         assert len(queue) == 4
 

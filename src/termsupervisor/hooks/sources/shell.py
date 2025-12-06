@@ -12,10 +12,10 @@ from typing import TYPE_CHECKING
 
 import iterm2
 
-from ..sources.base import HookSource
-from ..prompt_monitor import PromptMonitorManager, PromptMonitorStatus
-from ...telemetry import get_logger
 from ...config import LOG_MAX_CMD_LEN
+from ...telemetry import get_logger
+from ..prompt_monitor import PromptMonitorManager, PromptMonitorStatus
+from ..sources.base import HookSource
 
 if TYPE_CHECKING:
     from ..manager import HookManager
@@ -51,7 +51,7 @@ def sanitize_command(command: str, max_len: int = _CMD_TRUNCATE_LEN) -> str:
     cmd = re.sub(r"\s+", " ", cmd).strip()
     # 截断
     if len(cmd) > max_len:
-        return cmd[:max_len - 3] + "..."
+        return cmd[: max_len - 3] + "..."
     return cmd
 
 
@@ -99,12 +99,7 @@ class ShellHookSource(HookSource):
         """Get PromptMonitor status for a session (for heuristic gating)"""
         return self._prompt_monitor.get_status(session_id)
 
-    async def _on_command_event(
-        self,
-        session_id: str,
-        event_type: str,
-        info: str | int
-    ) -> None:
+    async def _on_command_event(self, session_id: str, event_type: str, info: str | int) -> None:
         """处理命令事件
 
         Args:

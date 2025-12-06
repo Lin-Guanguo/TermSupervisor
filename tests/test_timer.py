@@ -1,11 +1,11 @@
 """Timer 模块测试"""
 
 import asyncio
-import pytest
-from unittest.mock import Mock, AsyncMock
 
-from termsupervisor.timer import Timer
+import pytest
+
 from termsupervisor.telemetry import metrics
+from termsupervisor.timer import Timer
 
 
 @pytest.fixture
@@ -39,12 +39,13 @@ class TestTimerInterval:
         async def run_timer():
             await timer.run()
 
-        task = asyncio.create_task(run_timer())
+        _task = asyncio.create_task(run_timer())
         await asyncio.sleep(0.5)
         timer.stop()
         await asyncio.sleep(0.1)  # 等待清理
 
         assert counter["value"] >= 3
+        del _task  # ensure task is kept alive
 
     @pytest.mark.asyncio
     async def test_register_interval_async_callback(self, timer):
@@ -57,12 +58,13 @@ class TestTimerInterval:
 
         timer.register_interval("test_async", 0.15, async_callback)
 
-        task = asyncio.create_task(timer.run())
+        _task = asyncio.create_task(timer.run())
         await asyncio.sleep(0.5)
         timer.stop()
         await asyncio.sleep(0.1)
 
         assert counter["value"] >= 3
+        del _task  # ensure task is kept alive
 
     @pytest.mark.asyncio
     async def test_unregister_interval(self, timer):
@@ -98,7 +100,7 @@ class TestTimerDelay:
         timer.register_delay("test_delay", 0.2, callback)
         assert timer.delay_task_count == 1
 
-        task = asyncio.create_task(timer.run())
+        _task = asyncio.create_task(timer.run())
         await asyncio.sleep(0.15)
         assert triggered["value"] is False  # 还没到时间
 
@@ -110,6 +112,7 @@ class TestTimerDelay:
 
         # 触发后任务被清理
         assert timer.delay_task_count == 0
+        del _task  # ensure task is kept alive
 
     @pytest.mark.asyncio
     async def test_cancel_delay(self, timer):
@@ -127,12 +130,13 @@ class TestTimerDelay:
         assert timer.has_delay("test_cancel") is False
 
         # 运行一段时间，回调不应被触发
-        task = asyncio.create_task(timer.run())
+        _task = asyncio.create_task(timer.run())
         await asyncio.sleep(0.3)
         timer.stop()
         await asyncio.sleep(0.1)
 
         assert triggered["value"] is False
+        del _task  # ensure task is kept alive
 
     @pytest.mark.asyncio
     async def test_delay_overwrite(self, timer):
@@ -148,13 +152,14 @@ class TestTimerDelay:
         timer.register_delay("test_overwrite", 0.3, callback_1)
         timer.register_delay("test_overwrite", 0.2, callback_2)  # 覆盖
 
-        task = asyncio.create_task(timer.run())
+        _task = asyncio.create_task(timer.run())
         await asyncio.sleep(0.35)
         timer.stop()
         await asyncio.sleep(0.1)
 
         # 只有第二个回调被执行
         assert results == ["second"]
+        del _task  # ensure task is kept alive
 
     @pytest.mark.asyncio
     async def test_stop_cancels_pending_delays(self, timer):
@@ -166,7 +171,7 @@ class TestTimerDelay:
 
         timer.register_delay("pending", 1.0, callback)
 
-        task = asyncio.create_task(timer.run())
+        _task = asyncio.create_task(timer.run())
         await asyncio.sleep(0.1)
         timer.stop()
         await asyncio.sleep(0.1)
@@ -174,6 +179,7 @@ class TestTimerDelay:
         # 任务被取消，不会触发
         assert triggered["value"] is False
         assert timer.delay_task_count == 0
+        del _task  # ensure task is kept alive
 
 
 class TestTimerErrorHandling:
@@ -194,7 +200,7 @@ class TestTimerErrorHandling:
         timer.register_interval("good", 0.15, good_callback)
         timer.register_interval("bad", 0.15, bad_callback)
 
-        task = asyncio.create_task(timer.run())
+        _task = asyncio.create_task(timer.run())
         await asyncio.sleep(0.5)
         timer.stop()
         await asyncio.sleep(0.1)
@@ -204,6 +210,7 @@ class TestTimerErrorHandling:
         assert counter["bad"] >= 3
         # 应该有 timer.errors 计数
         assert metrics.get_counter("timer.errors", {"task": "bad"}) >= 3
+        del _task  # ensure task is kept alive
 
     @pytest.mark.asyncio
     async def test_async_callback_exception_isolated(self, timer):
@@ -220,7 +227,7 @@ class TestTimerErrorHandling:
         timer.register_interval("good", 0.15, good_callback)
         timer.register_interval("bad", 0.15, bad_callback)
 
-        task = asyncio.create_task(timer.run())
+        _task = asyncio.create_task(timer.run())
         await asyncio.sleep(0.5)
         timer.stop()
         await asyncio.sleep(0.1)
@@ -228,6 +235,7 @@ class TestTimerErrorHandling:
         assert counter["good"] >= 3
         assert counter["bad"] >= 3
         assert metrics.get_counter("timer.errors", {"task": "bad"}) >= 3
+        del _task  # ensure task is kept alive
 
 
 class TestTimerLifecycle:
@@ -236,7 +244,7 @@ class TestTimerLifecycle:
     @pytest.mark.asyncio
     async def test_double_run_warning(self, timer, caplog):
         """测试重复 run 产生警告"""
-        task = asyncio.create_task(timer.run())
+        _task = asyncio.create_task(timer.run())
         await asyncio.sleep(0.1)
         assert timer.is_running is True
 
@@ -245,6 +253,7 @@ class TestTimerLifecycle:
 
         timer.stop()
         await asyncio.sleep(0.1)
+        del _task  # ensure task is kept alive
 
     @pytest.mark.asyncio
     async def test_stop_idempotent(self, timer):
@@ -252,11 +261,12 @@ class TestTimerLifecycle:
         timer.stop()  # 未启动时 stop
         timer.stop()  # 再次 stop
 
-        task = asyncio.create_task(timer.run())
+        _task = asyncio.create_task(timer.run())
         await asyncio.sleep(0.1)
         timer.stop()
         timer.stop()  # 再次 stop
         await asyncio.sleep(0.1)
+        del _task  # ensure task is kept alive
 
     @pytest.mark.asyncio
     async def test_get_tasks(self, timer):

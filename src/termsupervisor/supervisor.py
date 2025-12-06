@@ -8,15 +8,14 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from termsupervisor import config
-from termsupervisor.iterm.models import LayoutData, PaneSnapshot, UpdateCallback
-from termsupervisor.analysis.change_queue import PaneChange, PaneHistory, PaneChangeQueue
-from termsupervisor.iterm import get_layout, normalize_session_id, session_id_match, ITerm2Client
 from termsupervisor.analysis import ContentCleaner
+from termsupervisor.analysis.change_queue import PaneChange, PaneChangeQueue, PaneHistory
+from termsupervisor.iterm import ITerm2Client, get_layout, normalize_session_id, session_id_match
+from termsupervisor.iterm.models import LayoutData, PaneSnapshot, UpdateCallback
 from termsupervisor.pane import TaskStatus
 
 if TYPE_CHECKING:
     from termsupervisor.hooks.manager import HookManager
-    from termsupervisor.analysis.content_heuristic import ContentHeuristicAnalyzer
     from termsupervisor.hooks.sources.shell import ShellHookSource
 
 logger = logging.getLogger(__name__)
@@ -52,8 +51,7 @@ class TermSupervisor:
         # 依赖注入
         self._hook_manager = hook_manager
         self._iterm_client = iterm_client
-        self._heuristic_analyzer: "ContentHeuristicAnalyzer | None" = None
-        self._shell_source: "ShellHookSource | None" = None
+        self._shell_source: ShellHookSource | None = None
 
         # 变化队列 (用于智能节流)
         self.pane_queues: dict[str, PaneChangeQueue] = {}
@@ -65,10 +63,6 @@ class TermSupervisor:
     def set_iterm_client(self, client: ITerm2Client) -> None:
         """设置 ITerm2Client"""
         self._iterm_client = client
-
-    def set_heuristic_analyzer(self, analyzer: "ContentHeuristicAnalyzer") -> None:
-        """设置 ContentHeuristicAnalyzer（用于内容启发式分析）"""
-        self._heuristic_analyzer = analyzer
 
     def set_shell_source(self, shell_source: "ShellHookSource") -> None:
         """设置 ShellHookSource（用于获取 PromptMonitor 状态）"""
@@ -107,13 +101,11 @@ class TermSupervisor:
     def _get_diff_lines(self, old_content: str, new_content: str) -> list[str]:
         """获取变更的行"""
         diff = difflib.unified_diff(
-            old_content.split("\n"),
-            new_content.split("\n"),
-            lineterm="",
-            n=0
+            old_content.split("\n"), new_content.split("\n"), lineterm="", n=0
         )
         return [
-            line for line in diff
+            line
+            for line in diff
             if line.startswith(("+", "-")) and not line.startswith(("+++", "---"))
         ]
 
@@ -137,12 +129,12 @@ class TermSupervisor:
     ) -> PaneChange:
         """创建 PaneChange 记录"""
         # 获取屏幕最后 N 行
-        lines = content.split('\n')
-        last_n_lines = lines[-config.SCREEN_LAST_N_LINES:]
+        lines = content.split("\n")
+        last_n_lines = lines[-config.SCREEN_LAST_N_LINES :]
 
         # 构建变化摘要
-        added_lines = [l[1:] for l in changed_lines if l.startswith('+')]
-        diff_summary = ' | '.join(added_lines[:3])  # 取前 3 行新增内容
+        added_lines = [line[1:] for line in changed_lines if line.startswith("+")]
+        diff_summary = " | ".join(added_lines[:3])  # 取前 3 行新增内容
 
         return PaneChange(
             timestamp=datetime.now(),
@@ -180,6 +172,8 @@ class TermSupervisor:
         """
         client = self._get_iterm_client()
         app = await client.get_app()
+        if app is None:
+            return []
         self.layout = await get_layout(app, self.exclude_names)
         now = datetime.now()
         updated_sessions = []
@@ -248,7 +242,9 @@ class TermSupervisor:
                             )
                     else:
                         # 新发现的 pane
-                        print(f"[{now.strftime('%H:%M:%S')}] 发现新 Panel [{pane.index}]: {pane.name}")
+                        print(
+                            f"[{now.strftime('%H:%M:%S')}] 发现新 Panel [{pane.index}]: {pane.name}"
+                        )
                         self.snapshots[pane.session_id] = PaneSnapshot(
                             session_id=pane.session_id,
                             index=pane.index,
@@ -258,60 +254,19 @@ class TermSupervisor:
                         # 新 pane 直接加入刷新列表
                         updated_sessions.append(pane.session_id)
 
-        # 执行状态分析 (runs for ALL panes on every poll)
-        await self._analyze_panes(panes_to_analyze)
-
         # 检查已关闭的 session
         self._cleanup_closed_sessions(now)
 
         self.layout.updated_sessions = updated_sessions
         return updated_sessions
 
-    async def _analyze_panes(self, panes: list[PaneHistory]):
-        """分析需要分析的 pane 状态
-
-        Runs content heuristic analysis for whitelisted panes.
-        Passes both job_name (preferred) and pane_title (fallback) for gating.
-        """
-        if not self._heuristic_analyzer or not self._shell_source:
-            return
-
-        hook_manager = self._get_hook_manager()
-
-        for history in panes:
-            pane_id = history.session_id
-
-            # Get queue for this pane
-            queue = self.pane_queues.get(pane_id)
-            if not queue:
-                continue
-
-            # Get current state from HookManager
-            state = hook_manager.get_state(pane_id)
-            if not state:
-                continue
-
-            # Get PromptMonitor status from ShellHookSource
-            prompt_status = self._shell_source.get_prompt_monitor_status(pane_id)
-
-            # Run heuristic analysis with both job_name and pane_title
-            job = history.job
-            await self._heuristic_analyzer.process_and_emit(
-                pane_id=pane_id,
-                pane_title=history.pane_name,
-                current_status=state.status,
-                current_source=state.source,
-                prompt_status=prompt_status,
-                queue=queue,
-                job_name=job.job_name if job else "",
-                command_line=job.redacted_command_line() if job else "",
-            )
-
     def _log_update(self, now: datetime, pane, changed_lines: list[str]):
         """记录更新日志"""
         added = sum(1 for line in changed_lines if line.startswith("+"))
         removed = sum(1 for line in changed_lines if line.startswith("-"))
-        print(f"[{now.strftime('%H:%M:%S')}] [{pane.index}] {pane.name} 有更新 (+{added} -{removed}):")
+        print(
+            f"[{now.strftime('%H:%M:%S')}] [{pane.index}] {pane.name} 有更新 (+{added} -{removed}):"
+        )
 
         display_lines = changed_lines[-5:]
         if len(changed_lines) > 5:
@@ -380,11 +335,7 @@ class TermSupervisor:
                     if session_id_match(pane.session_id, session_id):
                         # Tab 名称：有名字用名字，否则用 Tab{序号}
                         tab_display = tab.name if tab.name else f"Tab{tab_index}"
-                        return (
-                            window.name or "Window",
-                            tab_display,
-                            pane.name or "Pane"
-                        )
+                        return (window.name or "Window", tab_display, pane.name or "Pane")
         # 如果在 layout 中找不到，尝试从 pane_histories 获取名称
         pure_id = normalize_session_id(session_id)
         if pure_id in self.pane_histories:
@@ -399,7 +350,7 @@ class TermSupervisor:
             return ""
         home = os.path.expanduser("~")
         if path.startswith(home):
-            return "~" + path[len(home):]
+            return "~" + path[len(home) :]
         return path
 
     def get_layout_dict(self) -> dict:

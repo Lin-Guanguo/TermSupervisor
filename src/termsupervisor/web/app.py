@@ -9,9 +9,9 @@ import uvicorn
 from termsupervisor import config
 from termsupervisor.iterm import ITerm2Client
 from termsupervisor.iterm.utils import normalize_session_id
+from termsupervisor.runtime import RuntimeComponents, bootstrap
 from termsupervisor.supervisor import TermSupervisor
 from termsupervisor.web.server import WebServer
-from termsupervisor.runtime import bootstrap, RuntimeComponents
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +21,7 @@ def create_app(supervisor: TermSupervisor, iterm_client: ITerm2Client) -> WebSer
     return WebServer(supervisor, iterm_client)
 
 
-async def setup_hook_system(
-    server: WebServer,
-    connection: iterm2.Connection
-) -> RuntimeComponents:
+async def setup_hook_system(server: WebServer, connection: iterm2.Connection) -> RuntimeComponents:
     """设置 Hook 系统
 
     使用 runtime.bootstrap 创建组件。
@@ -52,25 +49,29 @@ async def setup_hook_system(
     async def on_status_change(pane_id: str, status, reason: str, source: str, suppressed: bool):
         """状态变更时广播到前端"""
         window_name, tab_name, pane_name = server.supervisor.get_pane_location(pane_id)
-        print(f"[HookStatus] pane_id={pane_id}, window={window_name}, tab={tab_name}, pane={pane_name}")
+        print(
+            f"[HookStatus] pane_id={pane_id}, window={window_name}, tab={tab_name}, pane={pane_name}"
+        )
 
         needs_notification = status.needs_notification and not suppressed
 
-        await server.broadcast({
-            "type": "hook_status",
-            "pane_id": pane_id,
-            "status": status.value,
-            "status_color": status.color,
-            "reason": reason,
-            "source": source,
-            "needs_notification": needs_notification,
-            "needs_attention": status.needs_attention,
-            "is_running": status.is_running,
-            "display": status.display,
-            "window_name": window_name,
-            "tab_name": tab_name,
-            "pane_name": pane_name,
-        })
+        await server.broadcast(
+            {
+                "type": "hook_status",
+                "pane_id": pane_id,
+                "status": status.value,
+                "status_color": status.color,
+                "reason": reason,
+                "source": source,
+                "needs_notification": needs_notification,
+                "needs_attention": status.needs_attention,
+                "is_running": status.is_running,
+                "display": status.display,
+                "window_name": window_name,
+                "tab_name": tab_name,
+                "pane_name": pane_name,
+            }
+        )
 
     components.hook_manager.set_change_callback(on_status_change)
 
@@ -104,8 +105,6 @@ async def start_server(connection: iterm2.Connection):
 
     # 注入 hook_manager 到 supervisor（用于状态获取和 content.changed 事件）
     supervisor.set_hook_manager(components.hook_manager)
-    # 注入 heuristic_analyzer 和 shell_source（用于内容启发式分析）
-    supervisor.set_heuristic_analyzer(components.heuristic_analyzer)
     supervisor.set_shell_source(components.shell_source)
 
     # 启动 Timer（LONG_RUNNING 检查 + Pane 延迟任务）
@@ -126,12 +125,7 @@ async def start_server(connection: iterm2.Connection):
 
     sync_task = asyncio.create_task(sync_sessions())
 
-    uvicorn_config = uvicorn.Config(
-        server.app,
-        host="0.0.0.0",
-        port=8765,
-        log_level="info"
-    )
+    uvicorn_config = uvicorn.Config(server.app, host="0.0.0.0", port=8765, log_level="info")
     uvicorn_server = uvicorn.Server(uvicorn_config)
 
     print("TermSupervisor Web Server starting at http://localhost:8765")

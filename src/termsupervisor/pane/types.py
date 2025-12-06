@@ -8,13 +8,14 @@
 - StateHistoryEntry: 历史记录条目
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Callable, Any, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .state_machine import PaneStateMachine
+    pass
 
 
 class TaskStatus(Enum):
@@ -28,6 +29,7 @@ class TaskStatus(Enum):
     - DONE: 完成待确认
     - FAILED: 失败待确认
     """
+
     IDLE = "idle"
     RUNNING = "running"
     LONG_RUNNING = "long_running"
@@ -96,6 +98,7 @@ class HookEvent:
         timestamp: 事件时间
         pane_generation: pane 代次（用于拒绝旧事件）
     """
+
     source: str
     pane_id: str
     event_type: str
@@ -123,11 +126,12 @@ class StateHistoryEntry:
 
     用于记录状态转换历史，便于排查问题。
     """
-    signal: str              # 触发信号
+
+    signal: str  # 触发信号
     from_status: TaskStatus  # 原状态
-    to_status: TaskStatus    # 新状态
-    success: bool = True     # 是否成功转换
-    description: str = ""    # 状态描述
+    to_status: TaskStatus  # 新状态
+    success: bool = True  # 是否成功转换
+    description: str = ""  # 状态描述
     timestamp: float = field(default_factory=lambda: datetime.now().timestamp())
 
     def __str__(self) -> str:
@@ -163,6 +167,7 @@ class StateChange:
         started_at: 运行开始时间
         running_duration: 运行时长（秒）
     """
+
     old_status: TaskStatus
     new_status: TaskStatus
     old_source: str
@@ -179,6 +184,7 @@ class DisplayState:
 
     Pane 维护的显示层数据，用于 WebSocket 广播。
     """
+
     status: TaskStatus
     source: str
     description: str
@@ -214,6 +220,7 @@ class StateSnapshot:
 
     提供给谓词函数访问的当前状态信息。
     """
+
     status: TaskStatus
     source: str
     state_id: int
@@ -232,6 +239,7 @@ class HeuristicInput:
 
     Provides pane context and PromptMonitor status for tiered gating.
     """
+
     pane_id: str
     pane_name: str  # Process name or title for whitelist matching
     current_status: TaskStatus
@@ -263,6 +271,7 @@ class TransitionRule:
         reset_started_at: 是否重置开始时间
         predicates: 谓词函数列表，全部满足才匹配
     """
+
     from_status: set[TaskStatus] | None  # None = any
     from_source: str | None  # None = any, "=" = same as current
     signal_pattern: str
@@ -313,6 +322,7 @@ class TransitionRule:
             for key, value in data.items():
                 # 处理 {key:30} 格式
                 import re
+
                 pattern = rf"\{{{key}:(\d+)\}}"
                 match = re.search(pattern, result)
                 if match:
@@ -324,7 +334,7 @@ class TransitionRule:
 
             # 整体截断
             if len(result) > max_length:
-                result = result[:max_length - 3] + "..."
+                result = result[: max_length - 3] + "..."
 
             return result
         except Exception:

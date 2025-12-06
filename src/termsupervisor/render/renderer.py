@@ -1,7 +1,6 @@
 """Terminal content to SVG renderer using Rich library."""
 
 import re
-from io import StringIO
 
 import iterm2
 from rich.console import Console
@@ -14,9 +13,11 @@ _INVALID_XML_CHARS_RE = re.compile(
     r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\ud800-\udfff\ufffe\uffff]"
 )
 
+
 def _sanitize_for_xml(text: str) -> str:
     """移除 XML 中不允许的字符。"""
     return _INVALID_XML_CHARS_RE.sub("", text)
+
 
 # ANSI 16 色映射到 Rich 颜色名
 ANSI_TO_RICH = {
@@ -142,9 +143,7 @@ class TerminalRenderer:
         contents = await session.async_get_screen_contents()
         return self._convert_contents_to_rich(contents)
 
-    def _convert_contents_to_rich(
-        self, contents: "iterm2.screen.ScreenContents"
-    ) -> Text:
+    def _convert_contents_to_rich(self, contents: "iterm2.screen.ScreenContents") -> Text:
         """将 ScreenContents 转换为 Rich Text。"""
         rich_text = Text()
 
@@ -182,7 +181,7 @@ class TerminalRenderer:
         fg = _color_to_rich(style_info.fg_color, "default")
         bg = _color_to_rich(style_info.bg_color, "default")
 
-        style_kwargs = {}
+        style_kwargs: dict[str, str | bool] = {}
         if fg != "default":
             style_kwargs["color"] = fg
         if bg != "default":
@@ -194,11 +193,9 @@ class TerminalRenderer:
         if style_info.underline:
             style_kwargs["underline"] = True
 
-        return Style(**style_kwargs) if style_kwargs else None
+        return Style(**style_kwargs) if style_kwargs else None  # type: ignore[arg-type]
 
-    def _render_to_svg(
-        self, rich_text: Text, width: int = 80, height: int | None = None
-    ) -> str:
+    def _render_to_svg(self, rich_text: Text, width: int = 80, height: int | None = None) -> str:
         """将 Rich Text 渲染为 SVG。
 
         Args:

@@ -1,12 +1,11 @@
 """HookManager 测试"""
 
 import pytest
-from unittest.mock import MagicMock
 
-from termsupervisor.pane import TaskStatus
 from termsupervisor.hooks.manager import HookManager
-from termsupervisor.timer import Timer
+from termsupervisor.pane import TaskStatus
 from termsupervisor.telemetry import metrics
+from termsupervisor.timer import Timer
 
 
 @pytest.fixture
@@ -61,9 +60,7 @@ class TestClaudeCodeEvents:
 
     async def test_session_start(self, manager):
         """处理 Claude Code 会话开始"""
-        result = await manager.process_claude_code_event(
-            "test-pane", "SessionStart"
-        )
+        result = await manager.process_claude_code_event("test-pane", "SessionStart")
 
         assert result is True
         assert manager.get_status("test-pane") == TaskStatus.RUNNING
@@ -110,9 +107,7 @@ class TestUserEvents:
     async def test_user_focus(self, manager):
         """处理用户 focus 事件"""
         # WAITING_APPROVAL → IDLE
-        await manager.process_claude_code_event(
-            "test-pane", "Notification:permission_prompt"
-        )
+        await manager.process_claude_code_event("test-pane", "Notification:permission_prompt")
         assert manager.get_status("test-pane") == TaskStatus.WAITING_APPROVAL
 
         result = await manager.process_user_focus("test-pane")
@@ -142,17 +137,15 @@ class TestContentEvents:
             content_hash="hash123",
         )
 
-        state = manager.get_state("test-pane")
         # 注意：content_update 本身不改变状态，只更新内容
         # 状态应该是 IDLE
+        _ = manager.get_state("test-pane")  # verify state exists
         assert manager.get_status("test-pane") == TaskStatus.IDLE
 
     async def test_content_update_waiting_to_running(self, manager):
         """content.update 在 WAITING 时触发兜底恢复"""
         # 先进入 WAITING 状态
-        await manager.process_claude_code_event(
-            "test-pane", "Notification:permission_prompt"
-        )
+        await manager.process_claude_code_event("test-pane", "Notification:permission_prompt")
         assert manager.get_status("test-pane") == TaskStatus.WAITING_APPROVAL
 
         # content.update 应该触发兜底恢复
@@ -182,12 +175,14 @@ class TestCallback:
         changes = []
 
         def callback(pane_id, status, description, source, suppressed):
-            changes.append({
-                "pane_id": pane_id,
-                "status": status,
-                "source": source,
-                "suppressed": suppressed,
-            })
+            changes.append(
+                {
+                    "pane_id": pane_id,
+                    "status": status,
+                    "source": source,
+                    "suppressed": suppressed,
+                }
+            )
 
         manager.set_change_callback(callback)
 
@@ -299,6 +294,7 @@ class TestLongRunning:
 
         # 手动设置 started_at 到过去
         import time
+
         machine = manager.state_manager.get_machine("test-pane")
         machine._started_at = time.time() - 100  # 100秒前
 
@@ -352,6 +348,7 @@ class TestEmitEvent:
     async def test_emit_event_custom_log_level(self, manager):
         """emit_event 自定义日志级别"""
         import logging
+
         result = await manager.emit_event(
             source="shell",
             pane_id="test-pane",

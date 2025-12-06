@@ -3,12 +3,12 @@
 from termsupervisor.iterm.client import ITerm2Client
 from termsupervisor.iterm.layout import get_layout
 from termsupervisor.iterm.models import (
-    PaneInfo,
-    TabInfo,
-    WindowInfo,
     LayoutData,
+    PaneInfo,
     PaneSnapshot,
+    TabInfo,
     UpdateCallback,
+    WindowInfo,
 )
 from termsupervisor.iterm.naming import (
     get_name,

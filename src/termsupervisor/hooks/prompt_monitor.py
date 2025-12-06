@@ -2,9 +2,9 @@
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Callable, Awaitable
 
 import iterm2
 
@@ -20,6 +20,7 @@ CommandEventCallback = Callable[[str, str, str | int], Awaitable[None]]
 @dataclass
 class PromptMonitorStatus:
     """Per-pane PromptMonitor status for content heuristic gating"""
+
     integration_active: bool = False  # True if shell integration is working
     last_prompt_event_at: float | None = None  # Timestamp of last prompt event
 
@@ -131,7 +132,7 @@ class PromptMonitorManager:
                 modes=[
                     iterm2.PromptMonitor.Mode.COMMAND_START,
                     iterm2.PromptMonitor.Mode.COMMAND_END,
-                ]
+                ],
             ) as monitor:
                 logger.info(f"[PromptMonitor] 开始监控 session: {session_id}")
 
@@ -139,7 +140,7 @@ class PromptMonitorManager:
                     try:
                         mode, info = await asyncio.wait_for(
                             monitor.async_get(),
-                            timeout=60.0  # 每分钟检查一次运行状态
+                            timeout=60.0,  # 每分钟检查一次运行状态
                         )
 
                         if mode == iterm2.PromptMonitor.Mode.COMMAND_START:
@@ -160,7 +161,7 @@ class PromptMonitorManager:
                             if self._on_command:
                                 await self._on_command(session_id, "command_end", exit_code)
 
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         # 超时，继续循环检查运行状态
                         continue
 

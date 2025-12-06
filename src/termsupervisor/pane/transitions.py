@@ -20,14 +20,12 @@
 | R1 | WAITING | * | content.changed | RUNNING | = |
 """
 
-from .types import TransitionRule, TaskStatus
 from .predicates import (
+    reject_same_source_in_long_running,
     require_exit_code,
     require_exit_code_nonzero,
-    require_source_match,
-    require_running_duration_gt,
-    reject_same_source_in_long_running,
 )
+from .types import TaskStatus, TransitionRule
 
 # RUNNING 和 LONG_RUNNING 的组合
 RUNNING_STATES = {TaskStatus.RUNNING, TaskStatus.LONG_RUNNING}
@@ -213,6 +211,30 @@ U2_USER_CLEAR_DONE_FAILED_CLICK = TransitionRule(
 
 # === Content 规则 ===
 
+# Heuristic status: RUNNING when keyword present
+H1_HEURISTIC_STATUS_RUNNING = TransitionRule(
+    from_status=None,  # Any status
+    from_source=None,  # Any source
+    signal_pattern="content.heuristic_status",
+    to_status=TaskStatus.RUNNING,
+    to_source="content",
+    description_template="关键词检测: 执行中",
+    reset_started_at=True,
+    predicates=[lambda e, _s: e.data.get("status") == "RUNNING"],
+)
+
+# Heuristic status: DONE when all keywords disappear
+H2_HEURISTIC_STATUS_DONE = TransitionRule(
+    from_status=RUNNING_STATES,
+    from_source="content",  # Only from content source
+    signal_pattern="content.heuristic_status",
+    to_status=TaskStatus.DONE,
+    to_source="content",
+    description_template="关键词检测: 完成",
+    reset_started_at=False,
+    predicates=[lambda e, _s: e.data.get("status") == "DONE"],
+)
+
 # 支持新名称 content.update
 R1_CONTENT_UPDATE_WAITING_TO_RUNNING = TransitionRule(
     from_status={TaskStatus.WAITING_APPROVAL},
@@ -236,54 +258,6 @@ R1_CONTENT_CHANGED_WAITING_TO_RUNNING = TransitionRule(
 )
 
 
-# === Content Heuristic 规则 ===
-# Tiered fallback signals for panes without shell integration
-
-# H1: IDLE → RUNNING on heuristic_run (output detected without start hook)
-H1_HEURISTIC_RUN = TransitionRule(
-    from_status={TaskStatus.IDLE},
-    from_source=None,  # 任意来源
-    signal_pattern="content.heuristic_run",
-    to_status=TaskStatus.RUNNING,
-    to_source="content",
-    description_template="检测到输出",
-    reset_started_at=True,
-)
-
-# H2: RUNNING/LONG → DONE on heuristic_done (prompt anchor or completion token)
-H2_HEURISTIC_DONE = TransitionRule(
-    from_status=RUNNING_STATES,
-    from_source=None,  # 任意来源
-    signal_pattern="content.heuristic_done",
-    to_status=TaskStatus.DONE,
-    to_source="content",
-    description_template="完成 ({reason})",
-    reset_started_at=False,  # 保留 started_at 用于计算运行时长
-)
-
-# H3: RUNNING/LONG → WAITING_APPROVAL on heuristic_wait (spinner/interactivity)
-H3_HEURISTIC_WAIT = TransitionRule(
-    from_status=RUNNING_STATES,
-    from_source=None,  # 任意来源
-    signal_pattern="content.heuristic_wait",
-    to_status=TaskStatus.WAITING_APPROVAL,
-    to_source="content",
-    description_template="等待输入",
-    reset_started_at=False,
-)
-
-# H4: RUNNING/LONG → IDLE on heuristic_idle (quiet, no patterns)
-H4_HEURISTIC_IDLE = TransitionRule(
-    from_status=RUNNING_STATES,
-    from_source=None,  # 任意来源
-    signal_pattern="content.heuristic_idle",
-    to_status=TaskStatus.IDLE,
-    to_source="content",
-    description_template="",
-    reset_started_at=True,
-)
-
-
 # === 规则表 ===
 # 按优先级排序：先匹配的规则优先
 
@@ -292,7 +266,6 @@ TRANSITION_RULES: list[TransitionRule] = [
     S1_SHELL_COMMAND_START,
     S2_SHELL_COMMAND_END_SUCCESS,
     S3_SHELL_COMMAND_END_FAILED,
-
     # Claude Code 规则
     C1_CLAUDE_SESSION_START,
     C2_CLAUDE_PRE_TOOL_USE,
@@ -300,27 +273,20 @@ TRANSITION_RULES: list[TransitionRule] = [
     C4_CLAUDE_PERMISSION_PROMPT,
     C5_CLAUDE_IDLE_PROMPT,
     C6_CLAUDE_SESSION_END,
-
     # Timer 规则
     T1_TIMER_CHECK_LONG_RUNNING,
     T2_WAITING_FALLBACK_TO_RUNNING,
     T3_WAITING_FALLBACK_TO_IDLE,
-
     # User 规则
     U1_USER_CLEAR_WAITING,
     U1_USER_CLEAR_WAITING_CLICK,
     U2_USER_CLEAR_DONE_FAILED,
     U2_USER_CLEAR_DONE_FAILED_CLICK,
-
     # Content 规则（新名称优先）
+    H1_HEURISTIC_STATUS_RUNNING,
+    H2_HEURISTIC_STATUS_DONE,
     R1_CONTENT_UPDATE_WAITING_TO_RUNNING,
     R1_CONTENT_CHANGED_WAITING_TO_RUNNING,  # 兼容旧名称
-
-    # Content Heuristic 规则 (Tier 2 fallback)
-    H1_HEURISTIC_RUN,
-    H2_HEURISTIC_DONE,
-    H3_HEURISTIC_WAIT,
-    H4_HEURISTIC_IDLE,
 ]
 
 

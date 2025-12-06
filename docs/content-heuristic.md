@@ -1,214 +1,192 @@
-# Content Heuristic for Long-Running Pane Recovery
+# Content Heuristic — Keyword-Gated Design (Canonical)
 
-Last Updated: 2025-12-02
+Last Updated: 2025-12-06
 
-## Context
+Canonical design for the keyword-gated content heuristic; supersedes the legacy content-heuristic document (removed).
 
-- Problem: panes that start commands without a `command_end` hook (e.g., codex) stay RUNNING → LONG_RUNNING indefinitely; focus/click cannot clear them because the state table lacks RUNNING|LONG_RUNNING → IDLE on user events.
-- Goal: add content-driven signals so we can safely move RUNNING/LONG_RUNNING to DONE or IDLE when output indicates completion—without requiring new hooks.
+## Goals
 
-## Strategy (Tiered, Single Source of Truth)
+- Remove process-name gating, and legacy content heuristics; avoid cross-repr conflicts.
+- Enter `heuristic` mode only after a keyword is seen; emit nothing outside `heuristic`.
+- Inside `heuristic`, support pattern detectors (`esc to <target>`, `1Yes`) with code-aware guards, plus configurable keyword signals (appear/disappear) and status emissions (RUNNING/DONE).
+- Keep the rest of the system neutral: suppress legacy heuristic events while `heuristic` is active.
+- Evaluate keyword deltas (seen → missing, missing → seen), not just raw presence; drive status from keyword presence.
 
-- **Tier 1 (Authority): PromptMonitor.** If iTerm2 Shell Integration emits `command_start`/`command_end`, those events own the state; heuristics are suppressed.
-- **Tier 2 (Fallback): Content heuristics.** Activate only when both are true:
-  - Pane process/title is whitelisted (default: `{"gemini", "codex"}` to avoid regular shells).
-  - PromptMonitor is either unavailable or silent for the pane (no prompt events for `T_prompt_silence`; expected for subprocesses like `python`, `ssh`, `codex`).
-- **Suppression on resolution:** Once a pane reaches DONE or FAILED (by any source), heuristics stop until the pane re-enters RUNNING via an explicit start signal or `heuristic_run`.
+## Mode Model
 
-## Regex Library (maintain here; add new anchors centrally)
+- **Default:** Neutral; heuristics off.
+- **Enter:** Detect keyword on the same text stream as heuristics (case-insensitive, standalone token with word boundaries). On first hit, set `heuristic_mode=True` and clear prior heuristic state. Keyword string is configurable (e.g., `CONTENT_HEURISTIC_KEYWORD`).
+- **While in `heuristic`:** The following signals may fire for that pane:
+  - **Detectors:** `esc to <target>` and `1Yes` pattern matches (emitting `heuristic_esc_to` / `heuristic_1yes`)
+  - **Keyword signals:** appear/disappear events from `CONTENT_HEURISTIC_KEYWORDS` mapping
+  - **Status signals:** `content.heuristic_status` with `{"status": "RUNNING"}` when any tracked keyword appears, `{"status": "DONE"}` when all disappear
 
-- `CONTENT_PROMPT_ANCHOR_REGEX`: `(?:[$#%>] |❯|➜|>>>|\.\.\.|In \[\d+\]:|\(Pdb\)|[A-Za-z]+> )\s*$`  
-  Covers standard shells, modern glyphs, Python/Node multi-line (`...`), IPython (`In [n]:`), PDB, and simple name-suffixed prompts (e.g., `Gemini> `).
-- `CONTENT_INTERACTIVITY_REGEX`: `(?:\([yY]/[nN]\)|\[[yY]/[nN]\]|\?\s*$|:\s*$|Press .* to .*|Press Enter to continue\.?\s*$|Select.*:\s*$)`  
-  Handles y/n, questions/colons, press-to-continue, and menu selections.
-- `CONTENT_SPINNER_PATTERNS`: keep existing spinner/ellipsis set (e.g., `\.{3,}$`, `\|/-`, `%`, `ETA`, `MB/s`).
+  Legacy heuristic signals (RUNNING/DONE/WAITING/IDLE from the old analyzer) remain suppressed **for that pane only**.
+- **Cadence:** Evaluation runs on every pane context fetch with a two-phase guard:
+  1. **Exit checks run unconditionally** — exit keyword and timeout are evaluated every fetch, even when content is unchanged (so timeouts fire on idle panes).
+  2. **Detectors/keyword/status evaluation** runs only when the content hash changes (resource guard). Per-pane dedupe/cooldown (default 2s) further prevents rapid re-emission for the same target.
+- **Exit:** Per-pane exit when the tracked shell process ends (pane PID exit), the pane ID is replaced/closed, or a configured external hook signal requests exit. Optional exit keyword and inactivity timeout are supported but default to off (timeout=0 ⇒ no auto-exit).
 
-## Signals to Emit
+### External exit signals (contract)
 
-- `content.heuristic_run`: lift IDLE → RUNNING when execution output is detected without a start hook.
-- `content.heuristic_done`: prefer DONE when the tail resembles a prompt or explicit completion.
-- `content.heuristic_idle`: fallback to IDLE when quiet without a strong completion marker.
-- `content.heuristic_wait`: ambiguous quiet period showing progress or user-input prompts; mirrors WAITING_APPROVAL handling.
+| Event id | Source | Required fields | Effect |
+| --- | --- | --- | --- |
+| `iterm.session_end` | iTerm client | `pane_id`, `pid` | Exit heuristic mode for that pane. |
+| `frontend.close_pane` | Web frontend | `pane_id` | Exit heuristic mode for that pane. |
+| `content.exit` | External hook | `pane_id` (optional `target`) | Exit heuristic mode for that pane; ignores missing pane_id. |
 
-## Detection Matrix (quiet + anchors + newline gate)
+## Keyword Signal Model
 
-Inputs: cleaned tail lines, timestamps, line-rate/newline count deltas, tail hash, last change time from `PaneChangeQueue` / `PaneHistory`.
+- Configurable signal table (appear/disappear): map keyword → signal_on_appear, signal_on_disappear; case-insensitive matching (mapping keys are normalized to lowercase at init). Evaluate deltas between frames (present → absent, absent → present) instead of single-frame detection; baseline on entry is "absent," and disappear events are suppressed until the keyword has been seen once.
+- Presence tracking is per pane; store last-seen timestamps to support debounce/cooldown and avoid cross-pane bleed-through. Keyword presence also drives heuristic status (RUNNING on presence, DONE on disappearance) with dedupe.
+- Example defaults: none shipped; user config defines actions (or leaves empty for no-op).
+- Legacy RUNNING/DONE/WAITING/IDLE heuristic signals remain suppressed while in `heuristic` mode (per-pane).
 
-| Signal | Trigger (all required) | Notes |
-| :--- | :--- | :--- |
-| `heuristic_run` | Activation gate passes; current state IDLE; newline count increased OR burst > 50 chars; line-rate over threshold; debounce window clear | Newline gate prevents firing on raw typing without Enter. |
-| `heuristic_wait` | Activation gate passes; state RUNNING/LONG_RUNNING; quiet ≥ `T_quiet_wait` (~1s); tail matches spinner **or** interactivity regex (y/n, ?, :, press-to-continue/menu) | Uses WAITING fallback paths; does not require newline; brief Markdown question bursts may momentarily flicker WAITING but will revert on next frame. |
-| `heuristic_done` | Activation gate passes; state RUNNING/LONG_RUNNING; quiet ≥ `T_quiet_done`; tail matches prompt anchor regex (see library) or completion tokens (`done`, `finished`, `success`, `exit code 0`, `ready`, `applied`, `updated`); not blocked by negative patterns | Anchored end-of-line focus covers REPL prompts (`>>>`, `...`, `In [n]:`, `Gemini>`, `Pdb`). |
-| `heuristic_idle` | Activation gate passes; state RUNNING/LONG_RUNNING; quiet ≥ `T_quiet_idle`; no spinner/interactivity/prompt anchors; tail hash stable; debounce window clear | Periodic re-emit allowed every `CONTENT_HEURISTIC_REEMIT_IDLE_SEC` if unchanged. |
+### Status signal contract
 
-Common suppressions: respect `CONTENT_NEGATIVE_PATTERNS` (e.g., spinners ending with `>`), per-signal debounce (`CONTENT_HEURISTIC_DEBOUNCE_SEC`), and stop firing after DONE/FAILED until reactivation.
+When keyword presence changes, the analyzer emits a status signal through HookManager:
 
-## State Machine Rules
+| Signal | Payload | Trigger | State machine transition |
+| --- | --- | --- | --- |
+| `content.heuristic_status` | `{"status": "RUNNING"}` | Any tracked keyword appears | → `RUNNING` (from any status) |
+| `content.heuristic_status` | `{"status": "DONE"}` | All tracked keywords disappear | → `DONE` (from `RUNNING`/`LONG_RUNNING` with source=content) |
 
-- RUNNING | LONG_RUNNING → DONE on `content.heuristic_done` (source `content`, keep `started_at`).
-- RUNNING | LONG_RUNNING → IDLE on `content.heuristic_idle` (source `content`, reset `started_at`).
-- RUNNING | LONG_RUNNING → WAITING_APPROVAL on `content.heuristic_wait` (source `content`, keep `started_at`); reuse WAITING fallbacks: `content.update` → RUNNING, `timer.waiting_fallback_running` → RUNNING, `timer.waiting_fallback_idle` → IDLE.
-- IDLE → RUNNING on `content.heuristic_run` (source `content`, set `started_at`).
+### Config (Python constants in `config.py`)
 
-## Module Design
-
-- Analyzer: `src/termsupervisor/analysis/content_heuristic.py`.
-- Feeds on `PaneChangeQueue` output; tracks per-pane window (last N cleaned lines, last change timestamp, tail hash, newline deltas, line-rate).
-- Requires PromptMonitor status per pane: `integration_active` and `last_prompt_event_at` to enforce the tiered gate (`T_prompt_silence`).
-- Emits heuristic events through `HookManager.emit_event(...)`; tracks last-fired per pane for debounce; stops after DONE/FAILED until reactivated.
-- Metrics: counters for fired/suppressed by signal + reason strings (visible via `make loghook`).
-
-## Configuration Knobs (`config.py`)
-
-- `CONTENT_HEURISTIC_ENABLED`
-- `CONTENT_HEURISTIC_PANE_WHITELIST` (title-based whitelist, fallback when jobName empty)
-- `CONTENT_HEURISTIC_JOB_WHITELIST` (jobName-based whitelist; default: `{"gemini", "codex", "copilot", "python", "node"}`)
-- `CONTENT_HEURISTIC_PREFER_JOB_NAME` (prefer jobName over title when both available; default: `True`)
-- `COMMAND_LINE_MAX_LENGTH` (max length before truncation in logs/events; default: `50`)
-- `CONTENT_T_PROMPT_SILENCE` (silence window before heuristics can engage when PromptMonitor is nominally active)
-- `CONTENT_T_QUIET_DONE`, `CONTENT_T_QUIET_IDLE`, `CONTENT_T_QUIET_WAIT`
-- `CONTENT_HEURISTIC_DEBOUNCE_SEC`, `CONTENT_HEURISTIC_REEMIT_IDLE_SEC`
-- `CONTENT_PROMPT_ANCHOR_REGEX`, `CONTENT_COMPLETION_TOKENS`, `CONTENT_NEGATIVE_PATTERNS`
-- `CONTENT_INTERACTIVITY_REGEX`, `CONTENT_SPINNER_PATTERNS`
-- `CONTENT_HEURISTIC_NEWLINE_GATE` (min newlines or burst size to allow `heuristic_run`)
-
-## Testing Plan
-
-- Unit: synthetic PaneChange sequences for prompt+quiet → DONE, burst+newline → RUNNING, spinner/input prompt → WAITING, quiet without anchors → IDLE, debounce and idle re-emit, negative-pattern suppression.
-- Integration-lite: feed PaneChangeQueue with codex-like output while toggling PromptMonitor status to verify the tiered gate (no double-fire when prompts exist, heuristics engage when silent).
-
-## Implementation Status
-
-- Shipped (Phases 0–5): config/regex surfaces, prompt-silence gate, newline + burst feed, tiered analyzer, heuristic transitions with WAITING fallbacks, and unit coverage in `tests/analysis/test_content_heuristic.py`.
-- Job metadata capture is live: `jobName`/`jobPid`/`commandLine` are pulled each poll via `ITerm2Client.get_session_job_metadata`, stored on `PaneHistory`, and used by the analyzer; `commandLine` is redacted via token masking + `COMMAND_LINE_MAX_LENGTH`.
-- **Stage 2 shipped**: Keyword-driven transitions for interrupt/approval patterns. Interrupt appearance → RUNNING, interrupt disappearance + quiet/anchor → DONE, approval appearance → WAITING_APPROVAL.
-- Next active work: optional telemetry/UI surfacing remains open.
-
-## Phase Checklist
-
-- [x] Phase 0: Config + regex surfaces
-- [x] Phase 1: PromptMonitor status plumbed to analyzer
-- [x] Phase 2: Newline/burst enrichment on PaneChangeQueue
-- [x] Phase 3: Tiered analyzer with debounce/idle re-emit + regex checks
-- [x] Phase 4: Heuristic transitions wired with WAITING fallbacks
-- [x] Phase 5: Integration-lite validation in tests
-- [x] Phase 6: Stage 2 keyword transitions (interrupt/approval)
-- [ ] Phase 7 (optional): UI/telemetry surfacing of heuristic counters/reasons
-
-### Style/Modularity Notes
-
-- Centralize regex/constants in `config.py`; no inline literals in analyzer.
-- Keep helpers small (`_matches_prompt_anchor`, `_is_interactivity_tail`); add brief comments only for non-obvious gates (prompt silence, newline gate).
-- Maintain type hints and ASCII; preserve existing architecture boundaries (analysis module emits to HookManager, not directly to state machine).
-
-## JobName Integration (current status + follow-ups)
-
-- Status: jobName/jobPid/commandLine/tty are fetched every poll via `ITerm2Client.get_session_job_metadata`; `_passes_whitelist` prefers jobName when present; `PaneHistory` stores redacted command lines for analyzer metrics.
-- Follow-ups: treat jobName flips as gate triggers (pause/resume heuristics when leaving/entering whitelist); optionally surface jobName/commandLine metadata in telemetry/dashboard; keep redaction guardrails for any logging/UI.
-
-## API Implementation Reference
-
-`async_get_variable` is already used in code to fetch job metadata; snippet retained for convenience.
-
-### Required Variables
-
-| Variable | Description | Requirement |
-| :--- | :--- | :--- |
-| `jobName` | Name of current **foreground** process (e.g., `vim`, `python`). Primary signal. | **Requires Shell Integration** |
-| `jobPid` | PID of current **foreground** job. | **Requires Shell Integration** |
-| `commandLine` | Full command line arguments. **Treat as sensitive**. | **Requires Shell Integration** |
-| `tty` | Path to local TTY device. | Always available |
-
-### Implementation Snippet
-
-Use `asyncio.gather` to minimize polling latency:
+Configuration is defined as Python constants in `src/termsupervisor/config.py`:
 
 ```python
-async def get_session_context(session: iterm2.Session) -> dict:
-    """Fetch execution context (requires iTerm2 Shell Integration for job fields)."""
-    try:
-        # Fetch in parallel; return_exceptions=True handles missing variables gracefully
-        results = await asyncio.gather(
-            session.async_get_variable("jobName"),
-            session.async_get_variable("jobPid"),
-            session.async_get_variable("commandLine"),
-            session.async_get_variable("tty"),
-            return_exceptions=True
-        )
-        
-        # Unpack and sanitize
-        job_name, job_pid, cmd_line, tty = results
-        
-        return {
-            "job_name": job_name if isinstance(job_name, str) else "",
-            "job_pid": int(job_pid) if isinstance(job_pid, str) and job_pid.isdigit() else None,
-            "command_line": cmd_line if isinstance(cmd_line, str) else "", # Redact in logs
-            "tty": tty if isinstance(tty, str) else ""
-        }
-    except Exception:
-        return {}
+# Entry keyword: non-empty string enables heuristic mode; empty disables
+CONTENT_HEURISTIC_KEYWORD = ""  # e.g., "go/heuristic" or "claude-code"
+
+# Optional exit keyword (empty => disabled)
+CONTENT_HEURISTIC_EXIT_KEYWORD = ""
+
+# Optional exit timeout in seconds (0 => no auto-exit)
+CONTENT_HEURISTIC_EXIT_TIMEOUT_SECONDS = 0
+
+# Dedupe/cooldown: suppress duplicate emissions for same (pane, detector, target)
+CONTENT_HEURISTIC_COOLDOWN_SECONDS = 2.0
+
+# Resource guard: max lines to scan for heuristic patterns
+CONTENT_HEURISTIC_MAX_SCAN_LINES = 200
+
+# Keyword signal mapping: {keyword: {on_appear, on_disappear}}
+CONTENT_HEURISTIC_KEYWORDS: dict[str, dict[str, str]] = {
+    # Example:
+    # "thinking": {"on_appear": "content.thinking", "on_disappear": "content.thinking_done"},
+}
+
+# Pattern detectors: list of pattern definitions
+# Each pattern has: name, regex, signal, guards (optional), target_group (optional), cooldown (optional)
+# Patterns are evaluated in order; first match on a line wins (use for priority)
+# Empty list disables pattern detection
+CONTENT_HEURISTIC_PATTERNS: list[dict[str, object]] = [
+    {
+        "name": "esc_to",
+        "regex": r"\besc to ([\w./:-]{1,64})\b",
+        "regex_flags": ["IGNORECASE"],
+        "signal": "heuristic_esc_to",
+        "target_group": 1,  # Capture group for target extraction
+        "target_strip": ".,;:!?",  # Characters to strip from target
+        "guards": [  # Lines matching any guard are skipped
+            r"\b(class|def|function|const|let|var)\b",
+            r"[{}();]",
+            r"\bescape_to\b",
+            r"^```|`[^`]+`",
+        ],
+        "cooldown": 2.0,
+    },
+    {
+        "name": "1yes",
+        "regex": r"^1\s*yes",
+        "regex_flags": ["IGNORECASE", "MULTILINE"],
+        "signal": "heuristic_1yes",
+        "target": "approval",  # Fixed target value (no capture group)
+        "guards": [
+            r"\b(class|def|function|const|let|var)\b",
+            r"[{}();]",
+            r"\bescape_to\b",
+            r"^```|`[^`]+`",
+            r"\b(case|switch|enum|return)\b",
+            r"^-\s+1\s*yes",
+        ],
+        "cooldown": 2.0,
+    },
+]
 ```
 
-## Future Heuristic Extensions
+**Config notes**
+- `CONTENT_HEURISTIC_KEYWORD` empty ⇒ heuristic mode disabled even if mappings exist.
+- Mapping keys are normalized to lowercase at init; detection is case-insensitive.
+- Multiple keywords can be active per pane; RUNNING is set if any are present, DONE when all mapped keywords are absent.
+- No env/pyproject loader exists; edit `config.py` directly or override via import.
 
-To reduce misclassification for AI/CLI tools, layer these stateful patterns:
+## Pattern Detectors (config-driven)
 
-- **Interrupt prompt disappearance (Codex)**: track `"esc to interrupt"` presence; only emit DONE when it disappears *and* quiet ≥ `T_quiet_done` (or no new output for a short window) to avoid early flips when the line scrolls off-screen.
-- **Interrupt-driven start/stop sequencing**: treat presence of `"esc to interrupt"` as RUNNING even without newline/burst; store `interrupt_seen_at` and only allow DONE after disappearance + quiet window or prompt anchor appears.
-- **Spinner → prompt flip**: if a spinner is active and a prompt anchor appears within `T_quiet_done`, emit DONE even if quiet is short (prompt wins over spinner).
-- **Keepalive plateau**: for steady spinner/ellipsis keepalives, if only spinner tokens arrive for > `T_stall`, emit WAITING instead of staying RUNNING; clear on any non-spinner line.
-- **Markdown question flicker guard**: require interactivity matches (`?`, `:`) to persist for ≥ `T_quiet_wait`; ignore single-frame matches if new output arrives within 0.5s.
-- **Foreground process flips**: when `jobName` changes from whitelisted to non-whitelisted mid-stream, pause heuristics until the next prompt-silence window to avoid cross-process state leaks.
-- **Approval prompts (Codex/Gemini/LLMs)**: detect `"1. Yes"` (configurable; allow variants like `"1. Yes, allow once"` via pattern list) as WAITING_APPROVAL; auto-clear on next `content.update` or prompt anchor, mirroring existing WAITING fallbacks.
+Pattern detectors are defined in `CONTENT_HEURISTIC_PATTERNS`. Each pattern has:
 
-## Stage 2: Stateful Keyword Transitions (Shipped)
+| Field | Type | Description |
+| --- | --- | --- |
+| `name` | string | Unique identifier for the pattern |
+| `regex` | string | Regular expression to match |
+| `regex_flags` | list | Optional flags: `IGNORECASE`, `MULTILINE` |
+| `signal` | string | Signal name to emit on match |
+| `guards` | list | Regex patterns that skip code-like lines |
+| `target_group` | int | Capture group for target extraction (optional) |
+| `target` | string | Fixed target value if no capture group (optional) |
+| `target_strip` | string | Characters to strip from extracted target (optional) |
+| `cooldown` | float | Per-pattern cooldown in seconds (default: `CONTENT_HEURISTIC_COOLDOWN_SECONDS`) |
 
-Status: **shipped** (initial implementation). Note: heuristics are still rough in practice; a follow-up refactor is planned to improve reliability/usability.
+**Evaluation order:** Patterns are evaluated in config order; first match on a line wins. This provides priority control (e.g., `esc_to` before `1yes`).
 
-### Configuration
+**Empty config:** `CONTENT_HEURISTIC_PATTERNS = []` disables all pattern detection.
 
-- `CONTENT_INTERRUPT_PATTERNS`: `["esc to interrupt", "esc to cancel", "press esc to stop"]`
-- `CONTENT_APPROVAL_PATTERNS`: `["1\\. Yes", "1\\. Yes, allow", "[Y]es"]`
-- `CONTENT_T_INTERRUPT_DONE`: defaults to `CONTENT_T_QUIET_DONE`
+### Default patterns
 
-### Per-Pane State (`HeuristicPaneState`)
+Two patterns are shipped by default:
 
-- `interrupt_seen_at`: timestamp when interrupt pattern first appeared.
-- `interrupt_present`: whether interrupt is currently visible.
-- `approval_seen_at`: timestamp when approval pattern first appeared.
-- `approval_present`: whether approval is currently visible.
+- **`esc_to`**: Matches `esc to <target>` with code guards; emits `heuristic_esc_to`
+- **`1yes`**: Matches `1Yes` / `1 yes` at line start; emits `heuristic_1yes` with fixed target `approval`
 
-### Transition Rules
+## Implementation Summary
 
-- **Interrupt appear** (not previously seen) → emit `heuristic_run` once (even without newline/burst).
-- **Interrupt disappear** (was seen, now absent) → emit `heuristic_done` only if quiet ≥ `T_quiet_done` **or** prompt/completion anchor present.
-- **Approval appear** (not previously seen) → emit `heuristic_wait` once.
-- **Approval clear** → auto-clear on next `content.update` or prompt anchor (reuses WAITING fallbacks).
-- Seen flags prevent re-emission while keyword persists; scroll-off without quiet does not trigger DONE.
+The heuristic analyzer is implemented in `src/termsupervisor/analysis/heuristic.py` as the `Heuristic` class, wired into `HookManager`.
 
-### Signal Priority (RUNNING/LONG_RUNNING)
+### Evaluation order (per fetch)
 
-Evaluation order (first match wins):
-1. DONE: prompt anchor or completion token (highest priority).
-2. DONE: interrupt disappeared **and** (quiet ≥ `T_quiet_done` **or** prompt/completion anchor).
-3. WAITING: approval keyword first appearance.
-4. WAITING: spinner/interactivity tail with quiet ≥ `T_quiet_wait`.
-5. IDLE: quiet ≥ `T_quiet_idle` + stable hash with no anchors/spinners/interactivity.
+1. **Exit checks (unconditional)** — If heuristic mode is active, check exit keyword and timeout before the content hash guard. This ensures timeouts fire even on idle panes with unchanged content.
+2. **Resource guard** — If content hash is unchanged since last fetch, skip remaining evaluation.
+3. **Entry check** — If not active, check for entry keyword (word-boundary match).
+4. **Detectors** — Scan recent lines (last `CONTENT_HEURISTIC_MAX_SCAN_LINES`) for configured patterns.
+5. **Keyword presence** — Evaluate appear/disappear deltas for configured keywords.
+6. **Status emission** — Emit `content.heuristic_status` on RUNNING/DONE flips.
 
-### Global Guards
+### Cooldown
 
-- Negative patterns suppress all signals early.
-- Per-signal debounce blocks rapid repeats.
-- DONE/FAILED set `suppressed_until_reactivation`; no further heuristic signals until `heuristic_run`.
-- Reactivation: `heuristic_run` fires on newline/burst **or** first appearance of interrupt keyword.
-- Interrupt state cleared on DONE emission.
+Dedupe key: `(detector, target_hash)` per pane. Each pattern can specify its own cooldown; default is `CONTENT_HEURISTIC_COOLDOWN_SECONDS` (2s).
 
-### Test Coverage
+### Telemetry
 
-Tests in `tests/analysis/test_content_heuristic.py`:
-- `TestInterruptPatterns`, `TestApprovalPatterns`: pattern matching.
-- `TestInterruptAppearance`: RUNNING trigger without newline gate.
-- `TestInterruptDisappearance`: DONE requires quiet or anchor; scroll-off without quiet does not DONE.
-- `TestApprovalAppearance`: WAITING trigger; persistence no re-emit.
-- `TestStage2Priority`: prompt anchor beats interrupt-based DONE; approval beats spinner.
-- `TestStage2StateTracking`: per-pane isolation; state cleared on DONE.
+Metrics emitted (in-memory counters via `telemetry.metrics`):
+- `heuristic.signal_emitted{signal, pane_id}` — detector signal fired
+- `heuristic.signal_suppressed{reason, pane_id}` — suppressed by cooldown
+- `heuristic.status_change{status}` — RUNNING/DONE status flip
+
+Rate limiting is handled by the cooldown mechanism only (no additional per-minute caps).
+
+## Migration Notes
+
+- Legacy content heuristic document has been removed; this file is the sole source of truth.
+- Default shipping stance: `CONTENT_HEURISTIC_KEYWORD` empty ⇒ `heuristic` disabled, no behavior change until configured.
+
+## Refactor Execution Guide (project-wide)
+
+All stages complete as of 2025-12-06.
+
+- **Stage 1: Tooling & policy** ✓
+- **Stage 2: Remove legacy heuristics** ✓
+- **Stage 3: Config simplification** ✓
+- **Stage 4: Implement keyword-gated heuristic** ✓
+- **Stage 5: Type/structure hardening** ✓
+- **Stage 6: Tests & verification** ✓ (221 tests passing)

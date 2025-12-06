@@ -1,18 +1,16 @@
 """iTerm2 布局遍历"""
 
-from typing import Union
-
 import iterm2
 
-from termsupervisor.iterm.models import PaneInfo, TabInfo, WindowInfo, LayoutData
+from termsupervisor.iterm.models import LayoutData, PaneInfo, TabInfo, WindowInfo
 from termsupervisor.iterm.naming import get_name
 
 
 async def traverse_node(
-    node: Union[iterm2.Session, iterm2.Splitter],
+    node: iterm2.Session | iterm2.Splitter,
     abs_x: float,
     abs_y: float,
-    exclude_names: list[str] | None = None
+    exclude_names: list[str] | None = None,
 ) -> tuple[list[PaneInfo], float, float]:
     """
     递归遍历节点，计算所有子 Session 的绝对坐标。
@@ -46,10 +44,10 @@ async def traverse_node(
         panes = []
         is_vertical = node.vertical
 
-        current_x_offset = 0
-        current_y_offset = 0
-        my_width = 0
-        my_height = 0
+        current_x_offset: float = 0.0
+        current_y_offset: float = 0.0
+        my_width: float = 0.0
+        my_height: float = 0.0
 
         for child in node.children:
             child_abs_x = abs_x + current_x_offset

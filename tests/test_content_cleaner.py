@@ -1,6 +1,5 @@
 """ContentCleaner 单元测试"""
 
-import pytest
 from termsupervisor.analysis.content_cleaner import ContentCleaner
 
 
@@ -43,9 +42,9 @@ class TestIsAllowedChar:
 
     def test_space_not_allowed(self):
         """空格不应该通过"""
-        assert not ContentCleaner.is_allowed_char(' ')
-        assert not ContentCleaner.is_allowed_char('\t')
-        assert not ContentCleaner.is_allowed_char('\n')
+        assert not ContentCleaner.is_allowed_char(" ")
+        assert not ContentCleaner.is_allowed_char("\t")
+        assert not ContentCleaner.is_allowed_char("\n")
 
     def test_punctuation_not_allowed(self):
         """标点符号不应该通过"""
@@ -54,7 +53,7 @@ class TestIsAllowedChar:
 
     def test_chinese_punctuation_not_allowed(self):
         """中文标点不应该通过"""
-        for c in "。、！？；：""''（）【】《》":
+        for c in "。、！？；：''（）【】《》":
             assert not ContentCleaner.is_allowed_char(c), f"'{c}' should NOT be allowed"
 
     def test_spinner_chars_not_allowed(self):

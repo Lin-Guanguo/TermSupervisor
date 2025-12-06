@@ -7,7 +7,6 @@
 """
 
 import logging
-from typing import Any
 
 # 全局日志配置
 _LOG_FORMAT = "[%(name)s] %(message)s"
