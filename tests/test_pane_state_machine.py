@@ -347,61 +347,6 @@ class TestUserTransitions:
 class TestContentTransitions:
     """内容变化流转测试"""
 
-    def test_content_update_waiting_to_running(self, machine):
-        """R1: WAITING_APPROVAL → RUNNING (content.update)"""
-        # 进入 WAITING 状态
-        machine.process(
-            HookEvent(
-                source="claude-code",
-                pane_id="test-pane-123",
-                event_type="Notification:permission_prompt",
-                pane_generation=1,
-            )
-        )
-        assert machine.status == TaskStatus.WAITING_APPROVAL
-        original_source = machine.source
-
-        event = HookEvent(
-            source="content",
-            pane_id="test-pane-123",
-            event_type="update",
-            pane_generation=1,
-        )
-
-        result = machine.process(event)
-
-        assert result is not None
-        assert machine.status == TaskStatus.RUNNING
-        # source 应该保持原来的 claude-code
-        assert machine.source == original_source
-
-    def test_content_changed_waiting_to_running_compat(self, machine):
-        """R1: WAITING_APPROVAL → RUNNING (content.changed 兼容)"""
-        # 进入 WAITING 状态
-        machine.process(
-            HookEvent(
-                source="claude-code",
-                pane_id="test-pane-123",
-                event_type="Notification:permission_prompt",
-                pane_generation=1,
-            )
-        )
-        assert machine.status == TaskStatus.WAITING_APPROVAL
-        original_source = machine.source
-
-        event = HookEvent(
-            source="content",
-            pane_id="test-pane-123",
-            event_type="changed",
-            pane_generation=1,
-        )
-
-        result = machine.process(event)
-
-        assert result is not None
-        assert machine.status == TaskStatus.RUNNING
-        assert machine.source == original_source
-
     def test_content_update_from_other_states_ignored(self, machine):
         """content.update 只在 WAITING_APPROVAL 时触发"""
         # IDLE 状态

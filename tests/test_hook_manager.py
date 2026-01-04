@@ -142,20 +142,6 @@ class TestContentEvents:
         _ = manager.get_state("test-pane")  # verify state exists
         assert manager.get_status("test-pane") == TaskStatus.IDLE
 
-    async def test_content_update_waiting_to_running(self, manager):
-        """content.update 在 WAITING 时触发兜底恢复"""
-        # 先进入 WAITING 状态
-        await manager.process_claude_code_event("test-pane", "Notification:permission_prompt")
-        assert manager.get_status("test-pane") == TaskStatus.WAITING_APPROVAL
-
-        # content.update 应该触发兜底恢复
-        await manager.process_content_update(
-            "test-pane",
-            content="output",
-            content_hash="hash456",
-        )
-        assert manager.get_status("test-pane") == TaskStatus.RUNNING
-
     async def test_content_changed_compat(self, manager):
         """content.changed 兼容方法仍可用"""
         # 旧的 process_content_changed 方法应该仍然有效

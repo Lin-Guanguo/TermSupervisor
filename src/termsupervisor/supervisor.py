@@ -10,7 +10,8 @@ from typing import TYPE_CHECKING
 from termsupervisor import config
 from termsupervisor.analysis import ContentCleaner
 from termsupervisor.analysis.change_queue import PaneChange, PaneChangeQueue, PaneHistory
-from termsupervisor.iterm import ITerm2Client, get_layout, normalize_session_id, session_id_match
+from termsupervisor.core.ids import id_match, normalize_id
+from termsupervisor.iterm import ITerm2Client, get_layout
 from termsupervisor.iterm.models import LayoutData, PaneSnapshot, UpdateCallback
 from termsupervisor.pane import TaskStatus
 
@@ -332,12 +333,12 @@ class TermSupervisor:
             for tab in window.tabs:
                 tab_index += 1
                 for pane in tab.panes:
-                    if session_id_match(pane.session_id, session_id):
+                    if id_match(pane.session_id, session_id):
                         # Tab 名称：有名字用名字，否则用 Tab{序号}
                         tab_display = tab.name if tab.name else f"Tab{tab_index}"
                         return (window.name or "Window", tab_display, pane.name or "Pane")
         # 如果在 layout 中找不到，尝试从 pane_histories 获取名称
-        pure_id = normalize_session_id(session_id)
+        pure_id = normalize_id(session_id)
         if pure_id in self.pane_histories:
             pane_name = self.pane_histories[pure_id].pane_name
             return ("Window", "Tab", pane_name or "Pane")

@@ -12,12 +12,8 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from ..config import (
-    LONG_RUNNING_THRESHOLD_SECONDS,
-    WAITING_FALLBACK_TIMEOUT_SECONDS,
-    WAITING_FALLBACK_TO_RUNNING,
-)
-from ..iterm.utils import normalize_session_id
+from ..config import LONG_RUNNING_THRESHOLD_SECONDS
+from ..core.ids import normalize_id
 from ..telemetry import get_logger, metrics
 from .pane import Pane
 from .queue import EventQueue
@@ -66,9 +62,6 @@ class StateManager:
         # pane generation 跟踪
         self._pane_generations: dict[str, int] = {}
 
-        # WAITING fallback 跟踪 {pane_id: (entered_at, state_id, has_content_change)}
-        self._waiting_fallback: dict[str, tuple[float, int, bool]] = {}
-
     # === 配置 ===
 
     def set_timer(self, timer: "Timer") -> None:
@@ -111,7 +104,7 @@ class StateManager:
         Returns:
             (machine, pane) 元组
         """
-        normalized_id = normalize_session_id(pane_id)
+        normalized_id = normalize_id(pane_id)
 
         if normalized_id not in self._machines:
             self._create_pane(normalized_id)
@@ -217,7 +210,7 @@ class StateManager:
         Returns:
             是否入队成功
         """
-        pane_id = normalize_session_id(event.pane_id)
+        pane_id = normalize_id(event.pane_id)
 
         # 确保 pane 存在
         self.get_or_create(pane_id)
@@ -240,7 +233,7 @@ class StateManager:
             处理的事件数
         """
         if pane_id:
-            pane_ids = [normalize_session_id(pane_id)]
+            pane_ids = [normalize_id(pane_id)]
         else:
             pane_ids = list(self._queues.keys())
 
@@ -280,65 +273,19 @@ class StateManager:
 
         pane_short = pane_id[:8]
 
-        # content.changed / content.update 特殊处理（兼容新旧名称）
+        # content.changed / content.update: 仅更新 Pane 内容，不触发状态转换
+        # 这是 Render Pipeline 的一部分，与 Event System 独立
         if event.signal in ("content.changed", "content.update"):
-            # 1. 先更新 Pane 内容
             content = event.data.get("content", "")
             content_hash = event.data.get("content_hash", "")
             pane.update_content(content, content_hash)
-
-            # 2. 如果是 WAITING_APPROVAL，标记有内容变化并尝试兜底恢复
-            if machine.status == TaskStatus.WAITING_APPROVAL:
-                # 标记有内容变化（用于 fallback 决策）
-                if pane_id in self._waiting_fallback:
-                    entered_at, state_id, _ = self._waiting_fallback[pane_id]
-                    self._waiting_fallback[pane_id] = (entered_at, state_id, True)
-
-                logger.debug(f"[StateManager:{pane_short}] Content fallback: WAITING → RUNNING")
-                metrics.inc("waiting.content_resume", {"pane": pane_short})
-
-                # 使用 content.update 信号处理
-                event.signal = "content.update"
-                change = machine.process(event)
-                if change:
-                    # 清除 WAITING fallback 跟踪
-                    self._waiting_fallback.pop(pane_id, None)
-                    pane.handle_state_change(change)
-                    # 更新队列的 state_id
-                    queue = self._queues.get(pane_id)
-                    if queue:
-                        queue.set_current_state_id(machine.state_id)
-                    # 发送调试事件
-                    self._emit_debug_event(pane_id, event.signal, "ok", state_id=machine.state_id)
-                else:
-                    # 获取失败原因
-                    reason = self._get_last_fail_reason(machine)
-                    self._emit_debug_event(
-                        pane_id, event.signal, "fail", reason=reason, state_id=machine.state_id
-                    )
-                return change is not None
-
-            # 非 WAITING 状态的 content 事件不触发调试事件（太频繁）
+            # 内容事件不触发调试事件（太频繁）
             return True
 
-        # 其他事件转发给状态机
-        old_status = machine.status
+        # 其他事件转发给状态机（Event System）
         change = machine.process(event)
 
         if change:
-            # 跟踪 WAITING 状态进入
-            if change.new_status == TaskStatus.WAITING_APPROVAL:
-                self._waiting_fallback[pane_id] = (
-                    datetime.now().timestamp(),
-                    change.state_id,
-                    False,  # 尚无内容变化
-                )
-                logger.debug(f"[StateManager:{pane_short}] Entered WAITING, fallback scheduled")
-
-            # 如果离开 WAITING 状态，清除 fallback 跟踪
-            elif old_status == TaskStatus.WAITING_APPROVAL:
-                self._waiting_fallback.pop(pane_id, None)
-
             pane.handle_state_change(change)
 
             # 更新队列的 state_id
@@ -406,107 +353,6 @@ class StateManager:
                     # 发送调试事件
                     self._emit_debug_event(pane_id, event.signal, "ok", state_id=machine.state_id)
 
-        # 检查 WAITING fallback 超时
-        self._check_waiting_fallback()
-
-        return triggered
-
-    def _check_waiting_fallback(self) -> list[str]:
-        """检查 WAITING 状态超时 fallback
-
-        超时后通过状态机处理：
-        - 如果有内容变化 → RUNNING（timer.waiting_fallback_running）
-        - 如果无内容变化 → IDLE（timer.waiting_fallback_idle）
-
-        Returns:
-            触发了 fallback 的 pane_id 列表
-        """
-        now = datetime.now().timestamp()
-        triggered = []
-        to_remove = []
-
-        for pane_id, (entered_at, state_id, has_content) in self._waiting_fallback.items():
-            machine = self._machines.get(pane_id)
-            pane = self._panes.get(pane_id)
-
-            if not machine or not pane:
-                to_remove.append(pane_id)
-                continue
-
-            # 检查状态是否仍为 WAITING
-            if machine.status != TaskStatus.WAITING_APPROVAL:
-                to_remove.append(pane_id)
-                continue
-
-            # 检查是否超时
-            elapsed = now - entered_at
-            if elapsed < WAITING_FALLBACK_TIMEOUT_SECONDS:
-                continue
-
-            pane_short = pane_id[:8]
-
-            # 决定 fallback 目标状态和事件类型
-            if has_content and WAITING_FALLBACK_TO_RUNNING:
-                # 有内容变化，转 RUNNING
-                event_type = "waiting_fallback_running"
-                reason = "timeout_with_content"
-            else:
-                # 无内容变化或配置转 IDLE
-                event_type = "waiting_fallback_idle"
-                reason = "timeout_no_content"
-
-            # 构造 fallback 事件，通过状态机处理
-            event = HookEvent(
-                source="timer",
-                pane_id=pane_id,
-                event_type=event_type,
-                data={
-                    "reason": reason,
-                    "has_content_change": has_content,
-                    "elapsed": elapsed,
-                },
-                pane_generation=machine.pane_generation,
-            )
-
-            # 通过状态机处理（使用规则表）
-            change = machine.process(event)
-
-            if change:
-                # 更新 Pane
-                pane.handle_state_change(change)
-
-                logger.info(
-                    f"[StateManager:{pane_short}] WAITING fallback: → {change.new_status.value} "
-                    f"(reason={reason}, elapsed={elapsed:.1f}s)"
-                )
-                metrics.inc("waiting.fallback", {"pane": pane_short, "reason": reason})
-
-                triggered.append(pane_id)
-
-                # 更新队列的 state_id
-                queue = self._queues.get(pane_id)
-                if queue:
-                    queue.set_current_state_id(machine.state_id)
-
-                # 发送调试事件
-                self._emit_debug_event(pane_id, event.signal, "ok", state_id=machine.state_id)
-            else:
-                logger.warning(
-                    f"[StateManager:{pane_short}] WAITING fallback failed: "
-                    f"no transition for {event.signal}"
-                )
-                # 发送失败调试事件
-                fail_reason = self._get_last_fail_reason(machine)
-                self._emit_debug_event(
-                    pane_id, event.signal, "fail", reason=fail_reason, state_id=machine.state_id
-                )
-
-            to_remove.append(pane_id)
-
-        # 清理已处理的 fallback
-        for pane_id in to_remove:
-            self._waiting_fallback.pop(pane_id, None)
-
         return triggered
 
     def _format_duration(self, seconds: float) -> str:
@@ -521,17 +367,17 @@ class StateManager:
 
     def get_status(self, pane_id: str) -> TaskStatus:
         """获取 pane 状态"""
-        pane_id = normalize_session_id(pane_id)
+        pane_id = normalize_id(pane_id)
         machine = self._machines.get(pane_id)
         return machine.status if machine else TaskStatus.IDLE
 
     def get_machine(self, pane_id: str) -> PaneStateMachine | None:
         """获取状态机"""
-        return self._machines.get(normalize_session_id(pane_id))
+        return self._machines.get(normalize_id(pane_id))
 
     def get_pane(self, pane_id: str) -> Pane | None:
         """获取 Pane"""
-        return self._panes.get(normalize_session_id(pane_id))
+        return self._panes.get(normalize_id(pane_id))
 
     def get_all_panes(self) -> set[str]:
         """获取所有 pane_id"""
@@ -546,11 +392,11 @@ class StateManager:
 
     def get_generation(self, pane_id: str) -> int:
         """获取 pane generation"""
-        return self._pane_generations.get(normalize_session_id(pane_id), 1)
+        return self._pane_generations.get(normalize_id(pane_id), 1)
 
     def increment_generation(self, pane_id: str) -> int:
         """递增 pane generation"""
-        pane_id = normalize_session_id(pane_id)
+        pane_id = normalize_id(pane_id)
         self._pane_generations[pane_id] = self._pane_generations.get(pane_id, 0) + 1
 
         machine = self._machines.get(pane_id)
@@ -571,7 +417,7 @@ class StateManager:
         max_pending_events: int = 10,
     ) -> dict | None:
         """获取指定 pane 的调试快照"""
-        pane_id = normalize_session_id(pane_id)
+        pane_id = normalize_id(pane_id)
         machine = self._machines.get(pane_id)
         pane = self._panes.get(pane_id)
         queue = self._queues.get(pane_id)
@@ -579,16 +425,6 @@ class StateManager:
         # 注意：用 is None 而不是 not，因为 EventQueue.__bool__ 在队列为空时返回 False
         if machine is None or pane is None or queue is None:
             return None
-
-        waiting_info = None
-        if pane_id in self._waiting_fallback:
-            entered_at, state_id, has_content = self._waiting_fallback[pane_id]
-            waiting_info = {
-                "entered_at": entered_at,
-                "state_id": state_id,
-                "has_content_change": has_content,
-                "timeout_seconds": WAITING_FALLBACK_TIMEOUT_SECONDS,
-            }
 
         history_entries = machine.history
         if max_history is not None:
@@ -606,7 +442,6 @@ class StateManager:
             },
             "display": pane.get_display_dict(),
             "queue": queue.debug_snapshot(max_pending=max_pending_events),
-            "waiting_fallback": waiting_info,
             "history": [entry.to_dict() for entry in history_entries],
             "content_hash": pane.content_hash,
         }
@@ -680,7 +515,7 @@ class StateManager:
 
     def remove_pane(self, pane_id: str) -> None:
         """移除 pane"""
-        pane_id = normalize_session_id(pane_id)
+        pane_id = normalize_id(pane_id)
 
         self._machines.pop(pane_id, None)
         self._panes.pop(pane_id, None)
@@ -698,7 +533,7 @@ class StateManager:
         Returns:
             被清理的 pane_id 列表
         """
-        normalized_active = {normalize_session_id(pid) for pid in active_pane_ids}
+        normalized_active = {normalize_id(pid) for pid in active_pane_ids}
         current_panes = set(self._panes.keys())
 
         closed = current_panes - normalized_active

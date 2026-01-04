@@ -20,7 +20,9 @@ from termsupervisor.iterm.naming import (
     set_tab_name,
     set_window_name,
 )
-from termsupervisor.iterm.utils import normalize_session_id, session_id_match
+# Re-export from core for backwards compatibility
+from termsupervisor.core.ids import id_match as session_id_match
+from termsupervisor.core.ids import normalize_id as normalize_session_id
 
 __all__ = [
     "ITerm2Client",

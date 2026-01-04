@@ -18,7 +18,6 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from ..analysis.heuristic import Heuristic
 from ..config import METRICS_ENABLED
 from ..pane import DisplayState, HookEvent, StateManager, TaskStatus
 from ..telemetry import get_logger, metrics
@@ -67,29 +66,8 @@ class HookManager:
         self._state_manager = state_manager or StateManager(timer=timer)
         self._on_change: StatusChangeCallback | None = None
 
-        # Heuristic analyzer for keyword-gated content detection
-        self._heuristic: Heuristic = Heuristic()
-        self._heuristic.set_emit_callback(self._heuristic_emit_callback)
-
         # 绑定内部回调
         self._state_manager.set_on_display_change(self._on_display_change)
-
-    async def _heuristic_emit_callback(
-        self,
-        source: str,
-        pane_id: str,
-        event_type: str,
-        data: dict[str, Any],
-        log: bool,
-    ) -> bool:
-        """Callback for Heuristic to emit events through HookManager"""
-        return await self.emit_event(
-            source=source,
-            pane_id=pane_id,
-            event_type=event_type,
-            data=data,
-            log=log,
-        )
 
     # === 配置 ===
 
@@ -225,11 +203,6 @@ class HookManager:
         """
         # 1. 规范化事件
         event = self._normalize_event(source, pane_id, event_type, data)
-
-        # 1.5. Route external exit signals to heuristic analyzer
-        signal = f"{source}.{event_type}"
-        if signal in ("iterm.session_end", "frontend.close_pane", "content.exit"):
-            self._heuristic.handle_exit_signal(signal, pane_id, data or {})
 
         # 2. 可选日志
         if log:

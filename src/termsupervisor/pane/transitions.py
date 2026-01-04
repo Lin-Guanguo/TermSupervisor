@@ -17,7 +17,6 @@
 | T1 | RUNNING | = | timer.check | LONG_RUNNING | = |
 | U1 | WAITING | * | iterm.focus / frontend.click_pane | IDLE | user |
 | U2 | DONE|FAILED | * | iterm.focus / frontend.click_pane | IDLE | user |
-| R1 | WAITING | * | content.changed | RUNNING | = |
 """
 
 from .predicates import (
@@ -144,27 +143,6 @@ T1_TIMER_CHECK_LONG_RUNNING = TransitionRule(
     reset_started_at=False,
 )
 
-# WAITING fallback 规则（超时恢复）
-T2_WAITING_FALLBACK_TO_RUNNING = TransitionRule(
-    from_status={TaskStatus.WAITING_APPROVAL},
-    from_source=None,  # 任意来源
-    signal_pattern="timer.waiting_fallback_running",
-    to_status=TaskStatus.RUNNING,
-    to_source="=",  # 保持原 source（不改为 timer）
-    description_template="超时恢复（有内容变化）",
-    reset_started_at=False,  # 保留 started_at
-)
-
-T3_WAITING_FALLBACK_TO_IDLE = TransitionRule(
-    from_status={TaskStatus.WAITING_APPROVAL},
-    from_source=None,  # 任意来源
-    signal_pattern="timer.waiting_fallback_idle",
-    to_status=TaskStatus.IDLE,
-    to_source="=",  # 保持原 source
-    description_template="超时恢复（无内容变化）",
-    reset_started_at=True,
-)
-
 
 # === User 规则（iterm/frontend）===
 
@@ -209,55 +187,6 @@ U2_USER_CLEAR_DONE_FAILED_CLICK = TransitionRule(
 )
 
 
-# === Content 规则 ===
-
-# Heuristic status: RUNNING when keyword present
-H1_HEURISTIC_STATUS_RUNNING = TransitionRule(
-    from_status=None,  # Any status
-    from_source=None,  # Any source
-    signal_pattern="content.heuristic_status",
-    to_status=TaskStatus.RUNNING,
-    to_source="content",
-    description_template="关键词检测: 执行中",
-    reset_started_at=True,
-    predicates=[lambda e, _s: e.data.get("status") == "RUNNING"],
-)
-
-# Heuristic status: DONE when all keywords disappear
-H2_HEURISTIC_STATUS_DONE = TransitionRule(
-    from_status=RUNNING_STATES,
-    from_source="content",  # Only from content source
-    signal_pattern="content.heuristic_status",
-    to_status=TaskStatus.DONE,
-    to_source="content",
-    description_template="关键词检测: 完成",
-    reset_started_at=False,
-    predicates=[lambda e, _s: e.data.get("status") == "DONE"],
-)
-
-# 支持新名称 content.update
-R1_CONTENT_UPDATE_WAITING_TO_RUNNING = TransitionRule(
-    from_status={TaskStatus.WAITING_APPROVAL},
-    from_source=None,  # 任意来源
-    signal_pattern="content.update",
-    to_status=TaskStatus.RUNNING,
-    to_source="=",  # 保持原 source
-    description_template="内容变化，恢复执行",
-    reset_started_at=False,
-)
-
-# 兼容旧名称 content.changed（临时别名）
-R1_CONTENT_CHANGED_WAITING_TO_RUNNING = TransitionRule(
-    from_status={TaskStatus.WAITING_APPROVAL},
-    from_source=None,  # 任意来源
-    signal_pattern="content.changed",
-    to_status=TaskStatus.RUNNING,
-    to_source="=",  # 保持原 source
-    description_template="内容变化，恢复执行",
-    reset_started_at=False,
-)
-
-
 # === 规则表 ===
 # 按优先级排序：先匹配的规则优先
 
@@ -275,18 +204,11 @@ TRANSITION_RULES: list[TransitionRule] = [
     C6_CLAUDE_SESSION_END,
     # Timer 规则
     T1_TIMER_CHECK_LONG_RUNNING,
-    T2_WAITING_FALLBACK_TO_RUNNING,
-    T3_WAITING_FALLBACK_TO_IDLE,
     # User 规则
     U1_USER_CLEAR_WAITING,
     U1_USER_CLEAR_WAITING_CLICK,
     U2_USER_CLEAR_DONE_FAILED,
     U2_USER_CLEAR_DONE_FAILED_CLICK,
-    # Content 规则（新名称优先）
-    H1_HEURISTIC_STATUS_RUNNING,
-    H2_HEURISTIC_STATUS_DONE,
-    R1_CONTENT_UPDATE_WAITING_TO_RUNNING,
-    R1_CONTENT_CHANGED_WAITING_TO_RUNNING,  # 兼容旧名称
 ]
 
 

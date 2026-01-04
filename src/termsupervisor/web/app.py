@@ -8,7 +8,7 @@ import uvicorn
 
 from termsupervisor import config
 from termsupervisor.iterm import ITerm2Client
-from termsupervisor.iterm.utils import normalize_session_id
+from termsupervisor.core.ids import normalize_id
 from termsupervisor.runtime import RuntimeComponents, bootstrap
 from termsupervisor.supervisor import TermSupervisor
 from termsupervisor.web.server import WebServer
@@ -39,8 +39,8 @@ async def setup_hook_system(server: WebServer, connection: iterm2.Connection) ->
         focus_session = components.iterm_source.current_focus_session
         if not focus_session:
             return False
-        normalized_pane = normalize_session_id(pane_id)
-        normalized_focus = normalize_session_id(focus_session)
+        normalized_pane = normalize_id(pane_id)
+        normalized_focus = normalize_id(focus_session)
         return normalized_pane == normalized_focus
 
     components.hook_manager.set_focus_checker(check_is_focused)
