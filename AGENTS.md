@@ -5,8 +5,8 @@ TermSupervisor monitors iTerm2 pane content and mirrors the layout on a real-tim
 ## Project Overview
 
 - **Core:** iTerm2 layout mirror with per-pane state pipeline; content changes filtered by ContentCleaner + PaneChangeQueue throttling.
-- **Architecture:** HookManager → StateManager (per-pane ActorQueue) → PaneStateMachine → Pane display (delay + notification suppression) with Timer handling LONG_RUNNING + delayed clears; layout/SVG rendered to a vanilla HTML/JS WebSocket dashboard.
-- **Hooks/UI:** Shell PromptMonitor, Claude Code HTTP hook, iTerm FocusMonitor (2s debounce); `content.update` comes from polling; frontend actions are JSON (`activate/rename/create_tab`, tabs-per-row & hidden-tab controls).
+- **Architecture:** HookManager → StateManager (per-pane ActorQueue + display layer) → PaneStateMachine with Timer handling LONG_RUNNING + auto-dismiss; layout/SVG rendered to a vanilla HTML/JS WebSocket dashboard. Event System (state events) and Render Pipeline (content polling) are independent.
+- **Hooks/UI:** Shell PromptMonitor, Claude Code HTTP hook, iTerm FocusMonitor (0.3s debounce); frontend actions are JSON (`activate/rename/create_tab`, tabs-per-row & hidden-tab controls).
 - **Docs:** `docs/state-architecture.md`; design source `mnema/state-architecture/`; hook notes `docs/hook-manager-refactor.md`.
 
 ## Building and Running
@@ -35,33 +35,38 @@ Dashboard: http://localhost:8765
 src/termsupervisor/
 ├── config.py               # Configuration constants
 ├── telemetry.py            # Logger + in-memory metrics facade
-├── timer.py                # Interval/delay scheduler (LONG_RUNNING + display delay)
-├── supervisor.py           # 1s polling + content.update emission + layout mirror
-├── runtime/                # Bootstrap + lifecycle
-│   └── bootstrap.py        # Centralized component construction (Timer, HookManager, Sources)
-├── pane/                   # State architecture
-│   ├── manager.py          # Coordination + per-pane ActorQueue + LONG_RUNNING
+├── timer.py                # Interval/delay scheduler (LONG_RUNNING + auto-dismiss)
+├── supervisor.py           # 1s polling + layout mirror (Render Pipeline)
+├── core/
+│   └── ids.py              # ID normalization utilities
+├── state/                  # State architecture
+│   ├── manager.py          # StateManager (ActorQueue + display + Timer tasks)
 │   ├── state_machine.py    # Transition processing + history/state_id
-│   ├── transitions.py      # Rule table (WAITING→RUNNING fallback, etc.)
-│   ├── pane.py             # Display layer (delay, notification suppression)
+│   ├── transitions.py      # Rule table
 │   ├── queue.py            # ActorQueue with generation/backpressure
-│   ├── predicates.py
-│   └── types.py
+│   ├── predicates.py       # Transition predicates
+│   └── types.py            # Data types (HookEvent, DisplayState, TaskStatus, etc.)
 ├── hooks/
-│   ├── manager.py          # HookManager facade (emit_event unified entry)
+│   ├── manager.py          # HookManager facade (Event System entry)
 │   ├── receiver.py         # HTTP /api/hook
-│   └── sources/            # Shell, Claude Code, iTerm focus debounce, PromptMonitor
-│       └── prompt_monitor.py   # iTerm2 PromptMonitor wrapper
-├── analysis/               # ContentCleaner + change_queue (throttle DTOs)
-│   ├── change_queue.py     # PaneChangeQueue, PaneHistory, PaneChange, ChangeRecord
-│   ├── cleaner.py          # ChangeCleaner (debounce/similarity filter)
-│   └── content_cleaner.py  # Unicode filter + hash
-├── iterm/                  # Layout traversal + client + models
-│   ├── models.py           # Layout DTOs (LayoutData, WindowInfo, TabInfo, PaneInfo, PaneSnapshot)
-│   └── ...
+│   ├── prompt_monitor.py   # iTerm2 PromptMonitor wrapper
+│   └── sources/            # Shell, Claude Code, iTerm focus debounce
+├── adapters/               # Terminal abstraction layer
+│   ├── base.py             # TerminalAdapter interface
+│   └── iterm2/             # iTerm2 implementation
+│       ├── adapter.py      # ITerm2Adapter
+│       ├── client.py       # iTerm2Client
+│       ├── layout.py       # Layout traversal
+│       ├── models.py       # Layout DTOs
+│       └── naming.py       # Naming utilities
+├── analysis/               # Content processing
+│   ├── content_cleaner.py  # Unicode filter + hash
+│   └── change_queue.py     # PaneChangeQueue throttling
 ├── render/                 # SVG renderer
+├── runtime/
+│   └── bootstrap.py        # Component construction
 ├── web/                    # FastAPI + WebSocket handlers
-│   └── app.py              # Entry point (uses runtime.bootstrap)
+│   └── app.py              # Entry point
 └── templates/index.html    # Frontend dashboard
 ```
 
@@ -69,12 +74,12 @@ src/termsupervisor/
 
 - `src/termsupervisor/runtime/bootstrap.py`: centralized component construction (Timer, HookManager, Sources, Receiver).
 - `src/termsupervisor/hooks/manager.py`: `emit_event()` unified entry, enqueue → StateManager, user/focus/click helpers.
-- `src/termsupervisor/pane/manager.py`: per-pane ActorQueue, LONG_RUNNING tick, content.update fallback, display callback.
-- `src/termsupervisor/pane/state_machine.py`: transition processing/history/state_id; predicates in `pane/predicates.py`.
-- `src/termsupervisor/pane/pane.py`: DONE/FAILED→IDLE delayed 5s, notification suppression (<3s or focused), content hash broadcast.
+- `src/termsupervisor/state/manager.py`: StateManager (per-pane ActorQueue + display layer + Timer tasks).
+- `src/termsupervisor/state/state_machine.py`: transition processing/history/state_id; predicates in `state/predicates.py`.
 - `src/termsupervisor/timer.py`: interval + delay scheduler (async/sync), `timer.errors` metric.
-- `src/termsupervisor/supervisor.py`: layout mirror, PaneChangeQueue-based throttle, emits `content.update` to HookManager.
-- `src/termsupervisor/iterm/models.py`: Layout DTOs (LayoutData, WindowInfo, TabInfo, PaneInfo, PaneSnapshot).
+- `src/termsupervisor/supervisor.py`: layout mirror, PaneChangeQueue-based throttle (Render Pipeline).
+- `src/termsupervisor/adapters/iterm2/models.py`: Layout DTOs (LayoutData, WindowInfo, TabInfo, PaneInfo, PaneSnapshot).
+- `src/termsupervisor/adapters/base.py`: TerminalAdapter interface (for future tmux support).
 - `src/termsupervisor/analysis/change_queue.py`: Content throttle DTOs (PaneChangeQueue, ChangeRecord, PaneChange, PaneHistory).
 - `docs/state-architecture.md`: current architecture summary.
 
@@ -91,7 +96,7 @@ src/termsupervisor/
 | DONE | `command_end`(exit=0), `Stop` | Green | Blinking |
 | FAILED | `command_end`(exit≠0) | Red | Blinking |
 
-Rule table excerpt (see `pane/transitions.py`):
+Rule table excerpt (see `state/transitions.py`):
 
 | # | from_status | from_source | signal | to_status | to_source | 描述 | reset_started_at | 备注 |
 |---|-------------|-------------|--------|-----------|-----------|------|------------------|------|
@@ -107,22 +112,21 @@ Rule table excerpt (see `pane/transitions.py`):
 | T1 | RUNNING | = | timer.check | LONG_RUNNING | = | 已运行 {elapsed} | N | StateManager 发出 |
 | U1 | WAITING_APPROVAL | * | iterm.focus / frontend.click_pane | IDLE | user |  | Y | 立即流转 |
 | U2 | DONE \| FAILED | * | iterm.focus / frontend.click_pane | IDLE | user |  | Y | 立即流转，显示延迟 |
-| R1 | WAITING_APPROVAL | * | content.update | RUNNING | = | 内容变化，恢复执行 | N | 始终渲染 Pane |
-| T2 | WAITING_APPROVAL | * | timer.waiting_fallback_running | RUNNING | = | 超时恢复（有内容变化） | N | WAITING 超时 fallback |
-| T3 | WAITING_APPROVAL | * | timer.waiting_fallback_idle | IDLE | = | 超时恢复（无内容变化） | Y | WAITING 超时 fallback |
 
 Signal format: `{source}.{event_type}` (e.g., `shell.command_start`, `claude-code.Stop`)
 
-## Content Change Detection
+## Content Change Detection (Render Pipeline)
 
 ```
-1s Polling → ContentCleaner → PaneChangeQueue → SVG Refresh + content.update → HookManager
+1s Polling → ContentCleaner → PaneChangeQueue → SVG Refresh → WebSocket
                   │                  │
                   │                  ├── Refresh: ≥5 lines or 10s timeout
                   │                  └── Queue push: ≥20 lines
                   │
                   └── Unicode whitelist (filters ANSI, spinners, punctuation)
 ```
+
+Note: Content events are UI-only (Render Pipeline), they do not trigger state transitions.
 
 ## Development Conventions
 
@@ -134,7 +138,8 @@ Signal format: `{source}.{event_type}` (e.g., `shell.command_start`, `claude-cod
 ## Current Status Notes
 
 - runtime/bootstrap builds the single Timer + HookManager + Sources stack; per-pane ActorQueue + generation gating are active.
-- WebSocket handler is JSON-only (`activate/rename/create_tab`); status changes broadcast from HookManager callback.
-- `supervisor.py` still uses PaneChangeQueue for content throttle; a dedicated content hook source is still pending.
+- **Event System** (HookManager → StateManager) handles state events only; **Render Pipeline** (Supervisor) handles content polling independently.
+- WebSocket handler is JSON-only (`activate/rename/create_tab`); status changes broadcast from HookManager.
+- `adapters/base.py` defines TerminalAdapter interface; `adapters/iterm2/` is the only implementation (tmux support planned).
 - State is in-memory only; restart resets all state/history.
 - Telemetry metrics are in-memory only; no Prometheus/StatsD sink yet.

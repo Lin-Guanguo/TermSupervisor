@@ -13,15 +13,15 @@ A real-time web dashboard that monitors all your iTerm2 panes. See terminal stat
 - **Real-time dashboard**: Mirrors the full iTerm2 layout with SVG rendering and per-pane status overlays.
 - **Layout controls**: Adjustable tabs-per-row (1–6) via settings drawer, hidden-tab dropdowns, context menu rename/hide, and inline "+ Tab" with layout presets.
 - **Interactive panes**: Click to activate in iTerm2, double-click to copy session ID, hover for path/process tooltip, focus badge indicator.
-- **State pipeline**: HookManager → StateManager (per-pane ActorQueue) → PaneStateMachine → Pane display (delay + notification suppression) with Timer driving LONG_RUNNING and delayed clears.
-- **Content change detection**: 1s polling → ContentCleaner → PaneChangeQueue throttling; refresh on ≥5 changed lines or 10s timeout and emit `content.changed` for WAITING→RUNNING fallback.
+- **State pipeline**: HookManager → StateManager (per-pane ActorQueue + display layer) → PaneStateMachine with Timer driving LONG_RUNNING and auto-dismiss.
+- **Content change detection**: 1s polling → ContentCleaner → PaneChangeQueue throttling; refresh on ≥5 changed lines or 10s timeout (Render Pipeline, independent from Event System).
 - **Notifications**: Floating panel with status colors; focus-aware suppression for <3s tasks or focused panes; auto-dismiss 60s after pane becomes IDLE.
 - **Debug panel**: Real-time state machine monitoring via WebSocket subscription.
 
 ## Architecture
 
 ```
-Signal Sources (shell | claude-code | iterm focus | frontend click | timer.check | content.changed)
+Signal Sources (shell | claude-code | iterm focus | frontend click | timer.check)
         │
         ▼
 ┌──────────────────────────┐
@@ -29,23 +29,24 @@ Signal Sources (shell | claude-code | iterm focus | frontend click | timer.check
 └──────────┬───────────────┘
            ▼
 ┌──────────────────────────┐
-│      StateManager        │ per-pane ActorQueue + cleanup
+│      StateManager        │ per-pane ActorQueue + display + Timer tasks
 └──────────┬───────────────┘
            ▼
-┌────────────────┐     ┌────────────────┐
-│PaneStateMachine│     │      Pane      │
-│rules/history   │     │delay + notify  │
-└────────────────┘     │suppression     │
-        ▲              └──────┬─────────┘
-        │                     │
-   Timer.tick (LONG_RUNNING)  │ Timer.delay (DONE/FAILED→IDLE)
-        └──────────────┬──────┘
-                       ▼
-      Status callback → WebSocket/UI
+┌────────────────┐
+│PaneStateMachine│
+│rules/history   │
+└────────────────┘
+        ▲
+        │
+   Timer.tick (LONG_RUNNING + auto-dismiss)
+        │
+        ▼
+      Status → WebSocket/UI
 ```
 
-- `runtime/bootstrap.py` creates a single Timer + HookManager + Sources/Receiver; Timer ticks every 1s for LONG_RUNNING and Pane delay tasks.
-- Layout/content path: `TermSupervisor` polls iTerm2 → ContentCleaner → PaneChangeQueue (≥5 lines or 10s) → layout snapshot + `content.changed` to HookManager; WebServer pushes layout + pane statuses via WebSocket.
+- `runtime/bootstrap.py` creates a single Timer + HookManager + Sources/Receiver.
+- **Event System**: HookManager → StateManager (state events only, no content events).
+- **Render Pipeline**: `TermSupervisor` polls iTerm2 → ContentCleaner → PaneChangeQueue → SVG refresh → WebSocket (independent from Event System).
 - Hook sources: Shell PromptMonitor, Claude Code HTTP hook, iTerm focus debounce (0.3s); frontend actions use JSON messages on `/ws`.
 
 ### State Machine
@@ -80,27 +81,35 @@ src/termsupervisor/
 ├── config.py               # All configuration constants
 ├── telemetry.py            # Logger + in-memory metrics facade
 ├── timer.py                # Interval/delay scheduler
-├── supervisor.py           # Polling + content.changed emission + layout mirror
-├── runtime/
-│   └── bootstrap.py        # Centralized component construction
-├── pane/
-│   ├── manager.py          # StateManager (per-pane ActorQueue, LONG_RUNNING)
+├── supervisor.py           # Polling + layout mirror (Render Pipeline)
+├── core/
+│   └── ids.py              # ID normalization utilities
+├── state/                  # State architecture
+│   ├── manager.py          # StateManager (ActorQueue + display + Timer tasks)
 │   ├── state_machine.py    # Transition processing + history
-│   ├── transitions.py      # Rule table (WAITING→RUNNING, etc.)
-│   ├── pane.py             # Display (delay, notification suppression)
+│   ├── transitions.py      # Rule table
 │   ├── queue.py            # ActorQueue with generation/backpressure
-│   └── predicates.py, types.py
+│   ├── predicates.py       # Transition predicates
+│   └── types.py            # Data types (HookEvent, DisplayState, TaskStatus, etc.)
 ├── hooks/
-│   ├── manager.py          # HookManager facade (normalize/enqueue)
+│   ├── manager.py          # HookManager facade (Event System entry)
 │   ├── receiver.py         # HTTP /api/hook endpoint
-│   └── sources/            # Shell, Claude Code, iTerm focus debounce, PromptMonitor
-│       └── prompt_monitor.py   # iTerm2 PromptMonitor wrapper
-├── analysis/               # ContentCleaner + change_queue + heuristic detectors
-│   └── heuristic.py        # Keyword-gated content pattern detection
-│   └── change_queue.py     # PaneChangeQueue, PaneHistory, PaneChange, ChangeRecord
-├── iterm/                  # Layout traversal + client helpers + layout models
-│   └── models.py           # LayoutData, WindowInfo, TabInfo, PaneInfo, PaneSnapshot
+│   ├── prompt_monitor.py   # iTerm2 PromptMonitor wrapper
+│   └── sources/            # Shell, Claude Code, iTerm focus debounce
+├── adapters/               # Terminal abstraction layer
+│   ├── base.py             # TerminalAdapter interface
+│   └── iterm2/             # iTerm2 implementation
+│       ├── adapter.py      # ITerm2Adapter
+│       ├── client.py       # iTerm2Client
+│       ├── layout.py       # Layout traversal
+│       ├── models.py       # Layout DTOs
+│       └── naming.py       # Naming utilities
+├── analysis/               # Content processing
+│   ├── content_cleaner.py  # Unicode filter + hash
+│   └── change_queue.py     # PaneChangeQueue throttling
 ├── render/                 # SVG renderer
+├── runtime/
+│   └── bootstrap.py        # Component construction
 ├── web/                    # FastAPI + WebSocket handlers
 └── templates/index.html    # Frontend (vanilla JS)
 ```
@@ -114,8 +123,9 @@ src/termsupervisor/
 ## Current Status Notes
 
 - runtime/bootstrap builds the single Timer + HookManager + Sources stack; per-pane ActorQueue + generation gating are active.
-- WebSocket handler is JSON-only (`activate/rename/create_tab`); status changes broadcast from HookManager callback.
-- `supervisor.py` still uses PaneChangeQueue for content throttle; a dedicated content hook source is still pending.
+- **Event System** (HookManager → StateManager) handles state events only; **Render Pipeline** (Supervisor) handles content polling independently.
+- WebSocket handler is JSON-only (`activate/rename/create_tab`); status changes broadcast from HookManager.
+- `adapters/base.py` defines TerminalAdapter interface; `adapters/iterm2/` is the only implementation (tmux support planned).
 - State is in-memory only; restart resets all state/history.
 - Telemetry metrics are in-memory only (no Prometheus/StatsD sink yet).
 
@@ -199,13 +209,6 @@ LOG_LEVEL = os.environ.get("TERMSUPERVISOR_LOG_LEVEL", "INFO")
 LOG_MAX_CMD_LEN = 120
 MASK_COMMANDS = False
 METRICS_ENABLED = True
-
-# === Content Heuristic (opt-in) ===
-CONTENT_HEURISTIC_KEYWORD = ""       # Entry keyword to enable (e.g., "claude-code")
-CONTENT_HEURISTIC_EXIT_KEYWORD = ""  # Optional exit keyword
-CONTENT_HEURISTIC_EXIT_TIMEOUT_SECONDS = 0  # Exit timeout (0 = disabled)
-CONTENT_HEURISTIC_COOLDOWN_SECONDS = 2.0    # Pattern cooldown
-CONTENT_HEURISTIC_MAX_SCAN_LINES = 200      # Resource guard
 ```
 
 ## Claude Code Integration
