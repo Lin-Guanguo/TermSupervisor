@@ -378,18 +378,17 @@ class HookManager:
 
     def get_reason(self, pane_id: str) -> str:
         """获取状态描述"""
-        pane = self._state_manager.get_pane(pane_id)
-        return pane.display_state.description if pane else ""
+        state = self._state_manager.get_display_state(pane_id)
+        return state.description if state else ""
 
     def get_active_source(self, pane_id: str) -> str:
         """获取当前状态来源"""
-        pane = self._state_manager.get_pane(pane_id)
-        return pane.display_state.source if pane else "shell"
+        state = self._state_manager.get_display_state(pane_id)
+        return state.source if state else "shell"
 
     def get_state(self, pane_id: str) -> DisplayState | None:
         """获取完整的 DisplayState"""
-        pane = self._state_manager.get_pane(pane_id)
-        return pane.display_state if pane else None
+        return self._state_manager.get_display_state(pane_id)
 
     def get_all_panes(self) -> set[str]:
         """获取所有 pane_id"""

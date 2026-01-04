@@ -1,25 +1,26 @@
 """StateManager - 状态管理器
 
-协调 PaneStateMachine 与 Pane：
-- 创建/管理实例
-- 绑定回调
+职责：
+- 创建/管理 PaneStateMachine 实例
 - 处理事件（通过 actor 队列串行化）
+- 管理显示状态（延迟显示、auto-dismiss、recently_finished）
 - 轮询 LONG_RUNNING
 - 清理过期 pane
 """
 
 from collections.abc import Callable
-from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from ..config import (
+    AUTO_DISMISS_DWELL_SECONDS,
+    DISPLAY_DELAY_SECONDS,
     LONG_RUNNING_THRESHOLD_SECONDS,
     NOTIFICATION_MIN_DURATION_SECONDS,
     QUIET_COMPLETION_THRESHOLD_SECONDS,
+    RECENTLY_FINISHED_HINT_SECONDS,
 )
 from ..core.ids import normalize_id
 from ..telemetry import get_logger, metrics
-from .pane import Pane
 from .queue import EventQueue
 from .state_machine import PaneStateMachine
 from .types import DisplayState, DisplayUpdate, HookEvent, StateChange, TaskStatus
@@ -38,12 +39,11 @@ FocusChecker = Callable[[str], bool]
 class StateManager:
     """状态管理器
 
-    协调 StateMachine 和 Pane，提供统一的事件处理入口。
+    统一管理状态机和显示逻辑。
 
     Attributes:
         timer: Timer 实例
         machines: 状态机字典 {pane_id: PaneStateMachine}
-        panes: Pane 字典 {pane_id: Pane}
         queues: 事件队列字典 {pane_id: EventQueue}
     """
 
@@ -55,10 +55,9 @@ class StateManager:
         """
         self._timer = timer
         self._machines: dict[str, PaneStateMachine] = {}
-        self._panes: dict[str, Pane] = {}  # Phase 3.5: 将被删除
         self._queues: dict[str, EventQueue] = {}
 
-        # Phase 3.4: 显示状态直接存储在 StateManager
+        # 显示状态存储
         self._display_states: dict[str, DisplayState] = {}
         self._content: dict[str, str] = {}
         self._content_hash: dict[str, str] = {}
@@ -76,8 +75,6 @@ class StateManager:
     def set_timer(self, timer: "Timer") -> None:
         """设置 Timer"""
         self._timer = timer
-        for pane in self._panes.values():
-            pane.set_timer(timer)
 
     def set_on_display_change(self, callback: OnDisplayChangeCallback) -> None:
         """设置显示变化回调"""
@@ -99,26 +96,24 @@ class StateManager:
     def set_focus_checker(self, checker: FocusChecker) -> None:
         """设置 focus 检查函数"""
         self._focus_checker = checker
-        for pane in self._panes.values():
-            pane.set_focus_checker(checker)
 
     # === 实例管理 ===
 
-    def get_or_create(self, pane_id: str) -> tuple[PaneStateMachine, Pane]:
+    def get_or_create(self, pane_id: str) -> tuple[PaneStateMachine, DisplayState]:
         """获取或创建 pane 实例
 
         Args:
             pane_id: pane 标识
 
         Returns:
-            (machine, pane) 元组
+            (machine, display_state) 元组
         """
         normalized_id = normalize_id(pane_id)
 
         if normalized_id not in self._machines:
             self._create_pane(normalized_id)
 
-        return self._machines[normalized_id], self._panes[normalized_id]
+        return self._machines[normalized_id], self._display_states[normalized_id]
 
     def _create_pane(self, pane_id: str) -> None:
         """创建新的 pane 实例"""
@@ -131,7 +126,7 @@ class StateManager:
             pane_generation=self._pane_generations[pane_id],
         )
 
-        # Phase 3.4: 直接初始化显示状态
+        # 初始化显示状态
         self._display_states[pane_id] = DisplayState(
             status=TaskStatus.IDLE,
             source="shell",
@@ -141,13 +136,6 @@ class StateManager:
         self._content[pane_id] = ""
         self._content_hash[pane_id] = ""
 
-        # Phase 3.5: Pane 将被删除，暂时保留用于兼容
-        pane = Pane(
-            pane_id=pane_id,
-            timer=self._timer,
-            focus_checker=self._focus_checker,
-        )
-
         # 创建队列
         queue = EventQueue(pane_id)
         queue.set_current_generation(self._pane_generations[pane_id])
@@ -156,20 +144,17 @@ class StateManager:
             queue.set_on_debug_event(self._on_debug_event)
 
         self._machines[pane_id] = machine
-        self._panes[pane_id] = pane
         self._queues[pane_id] = queue
 
         logger.debug(f"[StateManager] Created pane: {pane_id[:8]}")
 
-    def _on_pane_display_change(self, pane_id: str, state: DisplayState) -> None:
-        """Pane 显示变化回调"""
+    def _notify_display_change(self, pane_id: str, state: DisplayState) -> None:
+        """通知显示变化"""
         if not self._on_display_change:
             return
 
-        pane = self._panes.get(pane_id)
-        if pane:
-            suppressed, reason = pane.should_suppress_notification()
-            self._on_display_change(pane_id, state, suppressed, reason)
+        suppressed, reason = self._should_suppress_notification(pane_id)
+        self._on_display_change(pane_id, state, suppressed, reason)
 
     def _emit_debug_event(
         self,
@@ -292,35 +277,23 @@ class StateManager:
         if not machine:
             return None
 
-        pane_short = pane_id[:8]
-
         # content.changed / content.update: 仅更新内容，不触发状态转换
         # 这是 Render Pipeline 的一部分，与 Event System 独立
         if event.signal in ("content.changed", "content.update"):
             content = event.data.get("content", "")
             content_hash = event.data.get("content_hash", "")
-            # Phase 3.4: 直接更新内容存储
             self._content[pane_id] = content
             self._content_hash[pane_id] = content_hash
             if pane_id in self._display_states:
                 self._display_states[pane_id].content_hash = content_hash
-            # 兼容：同时更新 Pane（Phase 3.5 删除）
-            pane = self._panes.get(pane_id)
-            if pane:
-                pane.update_content(content, content_hash)
             return None
 
         # 其他事件转发给状态机（Event System）
         change = machine.process(event)
 
         if change:
-            # Phase 3.4: 直接更新显示状态
+            # 更新显示状态
             display_state = self._update_display_state(pane_id, change)
-
-            # 兼容：同时更新 Pane（Phase 3.5 删除）
-            pane = self._panes.get(pane_id)
-            if pane:
-                pane.handle_state_change(change)
 
             # 更新队列的 state_id
             queue = self._queues.get(pane_id)
@@ -329,6 +302,10 @@ class StateManager:
 
             # 发送调试事件
             self._emit_debug_event(pane_id, event.signal, "ok", state_id=machine.state_id)
+
+            # 注册 auto-dismiss 定时器（DONE/FAILED 自动消失）
+            if change.new_status in {TaskStatus.DONE, TaskStatus.FAILED}:
+                self._register_auto_dismiss(pane_id, change.state_id)
 
             # 计算通知抑制
             suppressed, reason = self._should_suppress_notification(pane_id)
@@ -416,10 +393,105 @@ class StateManager:
                 return last_entry.description
         return ""
 
+    # === Timer 任务管理 ===
+
+    def _get_timer_task_name(self, pane_id: str, task_type: str) -> str:
+        """获取 Timer 任务名"""
+        return f"pane_{task_type}_{pane_id[:8]}"
+
+    def _register_auto_dismiss(self, pane_id: str, state_id: int) -> None:
+        """注册 auto-dismiss 定时器
+
+        DONE/FAILED 状态在 dwell 时间后自动消失。
+        """
+        if not self._timer:
+            return
+
+        pane_short = pane_id[:8]
+        task_name = self._get_timer_task_name(pane_id, "auto_dismiss")
+
+        # 取消旧的 auto-dismiss 任务
+        if self._timer.has_delay(task_name):
+            self._timer.cancel_delay(task_name)
+
+        def auto_dismiss():
+            display_state = self._display_states.get(pane_id)
+            if not display_state:
+                return
+
+            # 检查 state_id 是否仍然匹配
+            if display_state.state_id != state_id:
+                logger.debug(
+                    f"[StateManager:{pane_short}] Auto-dismiss skipped: "
+                    f"state_id changed ({display_state.state_id} != {state_id})"
+                )
+                return
+
+            # 检查状态是否仍为 DONE/FAILED
+            if display_state.status not in {TaskStatus.DONE, TaskStatus.FAILED}:
+                return
+
+            old_status = display_state.status
+
+            # 设置 recently_finished 提示并转到 IDLE
+            display_state.recently_finished = True
+            display_state.status = TaskStatus.IDLE
+
+            logger.info(
+                f"[StateManager:{pane_short}] Auto-dismiss: {old_status.value} → IDLE "
+                f"(dwell={AUTO_DISMISS_DWELL_SECONDS}s)"
+            )
+            metrics.inc("pane.auto_dismiss", {"pane": pane_short})
+
+            # 通知显示变化
+            self._notify_display_change(pane_id, display_state)
+
+            # 注册 recently_finished 提示清除
+            self._register_recently_finished_clear(pane_id, state_id)
+
+        self._timer.register_delay(task_name, AUTO_DISMISS_DWELL_SECONDS, auto_dismiss)
+        logger.debug(f"[StateManager:{pane_short}] Auto-dismiss scheduled in {AUTO_DISMISS_DWELL_SECONDS}s")
+
+    def _register_recently_finished_clear(self, pane_id: str, state_id: int) -> None:
+        """注册 recently_finished 提示清除定时器"""
+        if not self._timer:
+            return
+
+        pane_short = pane_id[:8]
+        task_name = self._get_timer_task_name(pane_id, "recently_finished")
+
+        def clear_hint():
+            display_state = self._display_states.get(pane_id)
+            if not display_state:
+                return
+
+            # 只在 state_id 未变化时清除
+            if display_state.state_id != state_id:
+                return
+            if not display_state.recently_finished:
+                return
+
+            display_state.recently_finished = False
+            logger.debug(f"[StateManager:{pane_short}] Cleared recently_finished hint")
+
+            self._notify_display_change(pane_id, display_state)
+
+        self._timer.register_delay(task_name, RECENTLY_FINISHED_HINT_SECONDS, clear_hint)
+
+    def _cancel_pane_timer_tasks(self, pane_id: str) -> None:
+        """取消 pane 的所有 Timer 任务"""
+        if not self._timer:
+            return
+
+        for task_type in ("auto_dismiss", "recently_finished"):
+            task_name = self._get_timer_task_name(pane_id, task_type)
+            if self._timer.has_delay(task_name):
+                self._timer.cancel_delay(task_name)
+
     # === LONG_RUNNING 检查 ===
 
     def tick_all(self) -> list[str]:
-        """检查所有 pane 的 LONG_RUNNING 和 WAITING fallback
+        """检查所有 pane 的 LONG_RUNNING
 
         由 Timer 周期调用。
 
@@ -444,10 +516,8 @@ class StateManager:
 
                 change = machine.process(event)
                 if change:
-                    # 直接调用 Pane
-                    pane = self._panes.get(pane_id)
-                    if pane:
-                        pane.handle_state_change(change)
+                    # 更新显示状态
+                    self._update_display_state(pane_id, change)
                     triggered.append(pane_id)
                     # 更新队列的 state_id
                     queue = self._queues.get(pane_id)
@@ -478,31 +548,27 @@ class StateManager:
         """获取状态机"""
         return self._machines.get(normalize_id(pane_id))
 
-    def get_pane(self, pane_id: str) -> Pane | None:
-        """获取 Pane (Phase 3.5: deprecated)"""
-        return self._panes.get(normalize_id(pane_id))
-
     def get_content(self, pane_id: str) -> str:
-        """获取 pane 内容 (Phase 3.4)"""
+        """获取 pane 内容"""
         return self._content.get(normalize_id(pane_id), "")
 
     def get_content_hash(self, pane_id: str) -> str:
-        """获取 pane 内容 hash (Phase 3.4)"""
+        """获取 pane 内容 hash"""
         return self._content_hash.get(normalize_id(pane_id), "")
 
     def get_display_state(self, pane_id: str) -> DisplayState | None:
-        """获取显示状态 (Phase 3.4)"""
+        """获取显示状态"""
         return self._display_states.get(normalize_id(pane_id))
 
     def get_all_panes(self) -> set[str]:
         """获取所有 pane_id"""
-        return set(self._panes.keys())
+        return set(self._machines.keys())
 
     def get_all_states(self) -> dict[str, dict]:
         """获取所有状态（用于 WebSocket）"""
         result = {}
-        for pane_id, pane in self._panes.items():
-            result[pane_id] = pane.get_display_dict()
+        for pane_id, display_state in self._display_states.items():
+            result[pane_id] = display_state.to_dict()
         return result
 
     def get_generation(self, pane_id: str) -> int:
@@ -534,11 +600,11 @@ class StateManager:
         """获取指定 pane 的调试快照"""
         pane_id = normalize_id(pane_id)
         machine = self._machines.get(pane_id)
-        pane = self._panes.get(pane_id)
+        display_state = self._display_states.get(pane_id)
         queue = self._queues.get(pane_id)
 
         # 注意：用 is None 而不是 not，因为 EventQueue.__bool__ 在队列为空时返回 False
-        if machine is None or pane is None or queue is None:
+        if machine is None or display_state is None or queue is None:
             return None
 
         history_entries = machine.history
@@ -555,10 +621,10 @@ class StateManager:
                 "pane_generation": machine.pane_generation,
                 "description": machine.description,
             },
-            "display": pane.get_display_dict(),
+            "display": display_state.to_dict(),
             "queue": queue.debug_snapshot(max_pending=max_pending_events),
             "history": [entry.to_dict() for entry in history_entries],
-            "content_hash": pane.content_hash,
+            "content_hash": self._content_hash.get(pane_id, ""),
         }
 
     def get_all_debug_snapshots(
@@ -580,7 +646,7 @@ class StateManager:
             - total: 总 pane 数（分页前）
         """
         snapshots = []
-        all_pane_ids = sorted(self._panes.keys())
+        all_pane_ids = sorted(self._machines.keys())
         total = len(all_pane_ids)
 
         # 应用分页
@@ -592,14 +658,14 @@ class StateManager:
 
         for pane_id in pane_ids:
             machine = self._machines.get(pane_id)
-            pane = self._panes.get(pane_id)
+            display_state = self._display_states.get(pane_id)
             queue = self._queues.get(pane_id)
 
             # 注意：用 is None 而不是 not，因为 EventQueue.__bool__ 在队列为空时返回 False
-            if machine is None or pane is None or queue is None:
+            if machine is None or display_state is None or queue is None:
                 continue
 
-            display = pane.get_display_dict()
+            display = display_state.to_dict()
             queue_info = queue.debug_snapshot(max_pending=0)
             history = machine.history
 
@@ -632,11 +698,12 @@ class StateManager:
         """移除 pane"""
         pane_id = normalize_id(pane_id)
 
+        # 取消 Timer 任务
+        self._cancel_pane_timer_tasks(pane_id)
+
         self._machines.pop(pane_id, None)
-        self._panes.pop(pane_id, None)
         self._queues.pop(pane_id, None)
         self._pane_generations.pop(pane_id, None)
-        # Phase 3.4: 清理新增的存储
         self._display_states.pop(pane_id, None)
         self._content.pop(pane_id, None)
         self._content_hash.pop(pane_id, None)
@@ -653,7 +720,7 @@ class StateManager:
             被清理的 pane_id 列表
         """
         normalized_active = {normalize_id(pid) for pid in active_pane_ids}
-        current_panes = set(self._panes.keys())
+        current_panes = set(self._machines.keys())
 
         closed = current_panes - normalized_active
         for pane_id in closed:

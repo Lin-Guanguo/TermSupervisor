@@ -9,7 +9,6 @@
 """
 
 from .manager import StateManager
-from .pane import Pane
 from .predicates import (
     require_exit_code,
     require_exit_code_nonzero,
@@ -52,8 +51,6 @@ __all__ = [
     "require_source_match",
     # State Machine
     "PaneStateMachine",
-    # Pane
-    "Pane",
     # Queue
     "ActorQueue",
     "EventQueue",
