@@ -11,9 +11,9 @@ from termsupervisor import config
 from termsupervisor.analysis import ContentCleaner
 from termsupervisor.analysis.change_queue import PaneChange, PaneChangeQueue, PaneHistory
 from termsupervisor.core.ids import id_match, normalize_id
-from termsupervisor.iterm import ITerm2Client, get_layout
-from termsupervisor.iterm.models import LayoutData, PaneSnapshot, UpdateCallback
-from termsupervisor.pane import TaskStatus
+from termsupervisor.adapters.iterm2 import ITerm2Client, get_layout
+from termsupervisor.adapters.iterm2.models import LayoutData, PaneSnapshot, UpdateCallback
+from termsupervisor.state import TaskStatus
 
 if TYPE_CHECKING:
     from termsupervisor.hooks.manager import HookManager

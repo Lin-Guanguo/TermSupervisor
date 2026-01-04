@@ -2,8 +2,8 @@
 
 import iterm2
 
-from termsupervisor.iterm.models import LayoutData, PaneInfo, TabInfo, WindowInfo
-from termsupervisor.iterm.naming import get_name
+from termsupervisor.adapters.iterm2.models import LayoutData, PaneInfo, TabInfo, WindowInfo
+from termsupervisor.adapters.iterm2.naming import get_name
 
 
 async def traverse_node(

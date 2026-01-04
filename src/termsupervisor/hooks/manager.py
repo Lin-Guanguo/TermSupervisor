@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from ..config import METRICS_ENABLED
-from ..pane import DisplayState, DisplayUpdate, HookEvent, StateManager, TaskStatus
+from ..state import DisplayState, DisplayUpdate, HookEvent, StateManager, TaskStatus
 from ..telemetry import get_logger, metrics
 
 if TYPE_CHECKING:

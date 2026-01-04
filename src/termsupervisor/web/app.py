@@ -7,7 +7,7 @@ import iterm2
 import uvicorn
 
 from termsupervisor import config
-from termsupervisor.iterm import ITerm2Client
+from termsupervisor.adapters.iterm2 import ITerm2Client
 from termsupervisor.core.ids import normalize_id
 from termsupervisor.runtime import RuntimeComponents, bootstrap
 from termsupervisor.supervisor import TermSupervisor

@@ -4,7 +4,7 @@
 此文件保留 TaskStatus 属性测试。
 """
 
-from termsupervisor.pane import TaskStatus
+from termsupervisor.state import TaskStatus
 
 
 class TestTaskStatus:

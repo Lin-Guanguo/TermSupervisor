@@ -1,6 +1,6 @@
 """TermSupervisor 测试"""
 
-from termsupervisor.iterm.models import LayoutData, PaneInfo, TabInfo, WindowInfo
+from termsupervisor.adapters.iterm2.models import LayoutData, PaneInfo, TabInfo, WindowInfo
 
 
 def test_pane_info():

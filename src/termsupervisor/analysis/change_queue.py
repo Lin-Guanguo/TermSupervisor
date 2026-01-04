@@ -9,8 +9,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..iterm.client import JobMetadata
-    from ..pane import TaskStatus
+    from ..adapters.iterm2.client import JobMetadata
+    from ..state import TaskStatus
 
 
 @dataclass

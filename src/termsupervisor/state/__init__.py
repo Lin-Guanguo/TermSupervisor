@@ -1,11 +1,11 @@
-"""Pane 模块
+"""State 模块
 
 提供状态管理的核心组件：
 - types: 数据类型定义（HookEvent, StateChange, TaskStatus 等）
 - predicates: 流转规则谓词库
 - transitions: 状态流转规则表
 - state_machine: PaneStateMachine
-- pane: Pane 显示层
+- manager: StateManager（统一状态管理）
 """
 
 from .manager import StateManager

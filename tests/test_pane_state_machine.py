@@ -2,7 +2,7 @@
 
 import pytest
 
-from termsupervisor.pane import (
+from termsupervisor.state import (
     HookEvent,
     PaneStateMachine,
     StateChange,

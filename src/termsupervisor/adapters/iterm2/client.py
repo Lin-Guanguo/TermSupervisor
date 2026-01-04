@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import iterm2
 
 from termsupervisor import config
-from termsupervisor.iterm.naming import set_session_name, set_tab_name, set_window_name
+from termsupervisor.adapters.iterm2.naming import set_session_name, set_tab_name, set_window_name
 
 # Token-like patterns to mask (API keys, secrets, tokens)
 _TOKEN_PATTERNS = [

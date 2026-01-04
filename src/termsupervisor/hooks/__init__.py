@@ -6,12 +6,12 @@
 - sources/: 各类 Hook 源
 
 类型重导出：
-- TaskStatus, HookEvent 等类型统一从 pane 模块导出
+- TaskStatus, HookEvent 等类型统一从 state 模块导出
 """
 
 # 主模块
-# 统一类型（从 pane 模块重导出）
-from ..pane import HookEvent, TaskStatus
+# 统一类型（从 state 模块重导出）
+from ..state import HookEvent, TaskStatus
 from .manager import HookManager
 from .receiver import HookReceiver
 from .sources.base import HookSource

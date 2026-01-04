@@ -3,7 +3,7 @@
 import pytest
 
 from termsupervisor.hooks.manager import HookManager
-from termsupervisor.pane import TaskStatus
+from termsupervisor.state import TaskStatus
 from termsupervisor.telemetry import metrics
 from termsupervisor.timer import Timer
 

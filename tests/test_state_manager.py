@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from termsupervisor.pane import (
+from termsupervisor.state import (
     DisplayUpdate,
     HookEvent,
     StateManager,
@@ -310,7 +310,7 @@ class TestQueuePriority:
 
     def test_low_priority_dropped_at_high_watermark(self, manager):
         """低优先级事件在高水位时被丢弃"""
-        from termsupervisor.pane.queue import EventQueue
+        from termsupervisor.state.queue import EventQueue
 
         queue = EventQueue("test-pane", max_size=10)
 
@@ -342,7 +342,7 @@ class TestQueuePriority:
 
     def test_protected_signal_never_dropped(self, manager):
         """受保护信号永不丢弃"""
-        from termsupervisor.pane.queue import EventQueue
+        from termsupervisor.state.queue import EventQueue
 
         queue = EventQueue("test-pane", max_size=10)
 
@@ -373,7 +373,7 @@ class TestQueuePriority:
 
     def test_low_priority_allowed_below_watermark(self, manager):
         """低优先级事件在水位以下允许入队"""
-        from termsupervisor.pane.queue import EventQueue
+        from termsupervisor.state.queue import EventQueue
 
         queue = EventQueue("test-pane", max_size=10)
 
@@ -405,7 +405,7 @@ class TestQueuePriority:
 
     def test_merge_content_events(self, manager):
         """合并连续 content 事件"""
-        from termsupervisor.pane.queue import EventQueue
+        from termsupervisor.state.queue import EventQueue
 
         queue = EventQueue("test-pane", max_size=10)
 
@@ -462,7 +462,7 @@ class TestDisplayUpdate:
 
     def test_display_update_structure(self):
         """DisplayUpdate 基本结构"""
-        from termsupervisor.pane import DisplayState
+        from termsupervisor.state import DisplayState
 
         display_state = DisplayState(
             status=TaskStatus.RUNNING,
@@ -484,7 +484,7 @@ class TestDisplayUpdate:
 
     def test_display_update_suppressed(self):
         """DisplayUpdate 带 suppressed 标记"""
-        from termsupervisor.pane import DisplayState
+        from termsupervisor.state import DisplayState
 
         display_state = DisplayState(
             status=TaskStatus.DONE,
@@ -504,7 +504,7 @@ class TestDisplayUpdate:
 
     def test_display_update_to_dict(self):
         """DisplayUpdate to_dict 方法"""
-        from termsupervisor.pane import DisplayState
+        from termsupervisor.state import DisplayState
 
         display_state = DisplayState(
             status=TaskStatus.FAILED,

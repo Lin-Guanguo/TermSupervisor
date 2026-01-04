@@ -7,8 +7,8 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 
-from termsupervisor.iterm import ITerm2Client
-from termsupervisor.iterm.models import LayoutData
+from termsupervisor.adapters.iterm2 import ITerm2Client
+from termsupervisor.adapters.iterm2.models import LayoutData
 from termsupervisor.render import TerminalRenderer
 from termsupervisor.supervisor import TermSupervisor
 from termsupervisor.web.handlers import MessageHandler

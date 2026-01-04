@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import WebSocket
 
-from termsupervisor.iterm import ITerm2Client
+from termsupervisor.adapters.iterm2 import ITerm2Client
 from termsupervisor.supervisor import TermSupervisor
 from termsupervisor.telemetry import get_logger
 
