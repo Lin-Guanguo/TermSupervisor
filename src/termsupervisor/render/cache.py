@@ -32,23 +32,6 @@ class LayoutCache:
         """更新布局数据"""
         self.layout = layout
 
-    def update_snapshot(
-        self,
-        pane_id: str,
-        index: int,
-        content: str,
-        content_hash: str,
-        cleaned_content: str,
-    ) -> None:
-        """更新 pane 内容快照"""
-        now = datetime.now()
-        self.snapshots[pane_id] = PaneSnapshot(
-            pane_id=pane_id,
-            index=index,
-            content=content,
-            updated_at=now,
-        )
-
     def update_pane_state(
         self,
         pane_id: str,

@@ -14,9 +14,9 @@ Sources 通过 emit_event 发送事件，Manager 负责：
 """
 
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from ..config import METRICS_ENABLED
 from ..state import DisplayState, DisplayUpdate, HookEvent, StateManager, TaskStatus
@@ -33,8 +33,8 @@ LOG_INFO = logging.INFO
 LOG_WARNING = logging.WARNING
 
 # 回调类型
-StatusChangeCallback = Callable[[str, TaskStatus, str, str, bool], Any]
-DebugEventCallback = Callable[[dict], Any]
+StatusChangeCallback = Callable[[str, TaskStatus, str, str, bool], Awaitable[None]]
+DebugEventCallback = Callable[[dict], None]
 FocusChecker = Callable[[str], bool]
 
 
@@ -147,12 +147,12 @@ class HookManager:
 
             # Phase 3.3: 使用返回值直接调用回调（不依赖 Pane 回调链）
             for update in updates:
-                self._notify_change(update)
+                await self._notify_change(update)
 
             return True
         return False
 
-    def _notify_change(self, update: DisplayUpdate) -> None:
+    async def _notify_change(self, update: DisplayUpdate) -> None:
         """通知状态变更
 
         基于 DisplayUpdate 调用 _on_change 回调。
@@ -163,23 +163,13 @@ class HookManager:
         if not self._on_change:
             return
 
-        import asyncio
-
-        coro = self._on_change(
+        await self._on_change(
             update.pane_id,
             update.display_state.status,
             update.display_state.description,
             update.display_state.source,
             update.suppressed,
         )
-        # 如果回调是 async 函数，需要创建任务来执行
-        if asyncio.iscoroutine(coro):
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(coro)
-            except RuntimeError:
-                # 没有运行的事件循环，直接运行
-                asyncio.run(coro)
 
     async def emit_event(
         self,

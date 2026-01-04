@@ -1,6 +1,10 @@
 """iTerm2 布局遍历"""
 
+import logging
+
 import iterm2
+
+logger = logging.getLogger(__name__)
 
 from termsupervisor.adapters.iterm2.models import LayoutData, PaneInfo, TabInfo, WindowInfo
 from termsupervisor.adapters.iterm2.naming import get_name
@@ -89,8 +93,8 @@ async def get_layout(app: iterm2.App, exclude_names: list[str] | None = None) ->
             current_session = current_window.current_tab.current_session
             if current_session:
                 layout.active_pane_id = current_session.session_id
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Failed to get active session: {e}")
 
     for window in app.windows:
         frame = await window.async_get_frame()

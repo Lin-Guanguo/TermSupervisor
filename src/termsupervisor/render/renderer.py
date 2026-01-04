@@ -1,8 +1,11 @@
 """Terminal content to SVG renderer using Rich library."""
 
+import logging
 import re
 
 import iterm2
+
+logger = logging.getLogger(__name__)
 from rich.console import Console
 from rich.style import Style
 from rich.text import Text
@@ -49,8 +52,8 @@ def _color_to_rich(color, default: str = "default") -> str:
     try:
         if hasattr(color, "rgb") and color.rgb is not None:
             return f"rgb({color.rgb.red},{color.rgb.green},{color.rgb.blue})"
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Failed to convert RGB color: {e}")
 
     # 标准 ANSI 颜色
     try:
@@ -69,8 +72,8 @@ def _color_to_rich(color, default: str = "default") -> str:
                 # 灰度
                 gray = (idx - 232) * 10 + 8
                 return f"rgb({gray},{gray},{gray})"
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Failed to convert ANSI color: {e}")
 
     return default
 

@@ -1,9 +1,12 @@
 """Web 服务器"""
 
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+
+logger = logging.getLogger(__name__)
 from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 
@@ -170,11 +173,17 @@ class WebServer:
 
     async def broadcast(self, data: dict):
         """广播消息给所有客户端"""
+        disconnected = []
         for client in self.clients:
             try:
                 await client.send_json(data)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to send to client: {e}")
+                disconnected.append(client)
+        # Remove disconnected clients
+        for client in disconnected:
+            self.clients.remove(client)
+            self._debug_subscribers.discard(client)
 
     async def broadcast_debug_event(self, event: dict):
         """广播调试事件给订阅者"""
@@ -185,7 +194,8 @@ class WebServer:
         for client in list(self._debug_subscribers):
             try:
                 await client.send_json(debug_msg)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Failed to send debug event to client: {e}")
                 self._debug_subscribers.discard(client)
 
     def subscribe_debug(self, websocket: WebSocket) -> bool:

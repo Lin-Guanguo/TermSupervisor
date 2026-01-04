@@ -1,10 +1,13 @@
 """iTerm2 API 客户端封装"""
 
 import asyncio
+import logging
 import re
 from dataclasses import dataclass
 
 import iterm2
+
+logger = logging.getLogger(__name__)
 
 from termsupervisor import config
 from termsupervisor.adapters.iterm2.naming import set_session_name, set_tab_name, set_window_name
@@ -218,7 +221,8 @@ class ITerm2Client:
         try:
             job_name = await session.async_get_variable("jobName")
             return job_name or ""
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to get job name: {e}")
             return ""
 
     async def get_session_job_metadata(self, session: iterm2.Session) -> JobMetadata:
@@ -256,7 +260,8 @@ class ITerm2Client:
                 tty=tty_str,
                 path=path_str,
             )
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to get job metadata: {e}")
             return JobMetadata()
 
     @staticmethod

@@ -44,23 +44,6 @@ class TestLayoutCache:
         assert cache.layout == layout
         assert len(cache.layout.windows) == 1
 
-    def test_update_snapshot(self):
-        """Test updating pane snapshot."""
-        cache = LayoutCache()
-        cache.update_snapshot(
-            pane_id="pane-1",
-            index=0,
-            content="hello world",
-            content_hash="hash123",
-            cleaned_content="hello world",
-        )
-
-        snapshot = cache.get_snapshot("pane-1")
-        assert snapshot is not None
-        assert snapshot.pane_id == "pane-1"
-        assert snapshot.content == "hello world"
-        assert snapshot.index == 0
-
     def test_update_pane_state(self):
         """Test updating pane state."""
         cache = LayoutCache()
@@ -144,11 +127,6 @@ class TestLayoutCache:
         cache = LayoutCache()
         cache.mark_rendered("nonexistent")  # Should not raise
 
-    def test_get_snapshot_nonexistent(self):
-        """Test getting nonexistent snapshot returns None."""
-        cache = LayoutCache()
-        assert cache.get_snapshot("nonexistent") is None
-
     def test_get_pane_state_nonexistent(self):
         """Test getting nonexistent pane state returns None."""
         cache = LayoutCache()
@@ -158,13 +136,6 @@ class TestLayoutCache:
         """Test removing a pane."""
         cache = LayoutCache()
 
-        cache.update_snapshot(
-            pane_id="pane-1",
-            index=0,
-            content="test",
-            content_hash="h1",
-            cleaned_content="test",
-        )
         cache.update_pane_state(
             pane_id="pane-1",
             name="zsh",
@@ -173,12 +144,10 @@ class TestLayoutCache:
             cleaned_content="test",
         )
 
-        assert cache.get_snapshot("pane-1") is not None
         assert cache.get_pane_state("pane-1") is not None
 
         cache.remove_pane("pane-1")
 
-        assert cache.get_snapshot("pane-1") is None
         assert cache.get_pane_state("pane-1") is None
 
     def test_get_current_pane_ids(self):
@@ -204,17 +173,17 @@ class TestLayoutCache:
         """Test cleaning up closed panes."""
         cache = LayoutCache()
 
-        # Add snapshots for two panes
-        cache.update_snapshot(
+        # Add pane states for two panes
+        cache.update_pane_state(
             pane_id="pane-1",
-            index=0,
+            name="zsh",
             content="test1",
             content_hash="h1",
             cleaned_content="test1",
         )
-        cache.update_snapshot(
+        cache.update_pane_state(
             pane_id="pane-2",
-            index=1,
+            name="vim",
             content="test2",
             content_hash="h2",
             cleaned_content="test2",
@@ -232,16 +201,16 @@ class TestLayoutCache:
         # Cleanup should remove pane-2
         closed = cache.cleanup_closed_panes()
         assert closed == ["pane-2"]
-        assert cache.get_snapshot("pane-1") is not None
-        assert cache.get_snapshot("pane-2") is None
+        assert cache.get_pane_state("pane-1") is not None
+        assert cache.get_pane_state("pane-2") is None
 
     def test_cleanup_closed_panes_none_closed(self):
         """Test cleanup when no panes are closed."""
         cache = LayoutCache()
 
-        cache.update_snapshot(
+        cache.update_pane_state(
             pane_id="pane-1",
-            index=0,
+            name="zsh",
             content="test",
             content_hash="h1",
             cleaned_content="test",

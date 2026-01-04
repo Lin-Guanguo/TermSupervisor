@@ -8,6 +8,7 @@
 - StateHistoryEntry: 历史记录条目
 """
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -16,6 +17,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     pass
+
+logger = logging.getLogger(__name__)
 
 
 class TaskStatus(Enum):
@@ -366,7 +369,8 @@ class TransitionRule:
                 result = result[: max_length - 3] + "..."
 
             return result
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to format description template: {e}")
             return self.description_template[:max_length]
 
     def get_target_source(self, current_source: str) -> str:
