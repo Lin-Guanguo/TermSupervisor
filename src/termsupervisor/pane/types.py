@@ -213,6 +213,35 @@ class DisplayState:
         }
 
 
+@dataclass
+class DisplayUpdate:
+    """显示更新 - StateManager 处理事件后的返回值
+
+    用于替代回调机制。StateManager.process_event() 返回此对象，
+    HookManager 根据返回值决定是否广播到 WebSocket。
+
+    Attributes:
+        pane_id: pane 标识
+        display_state: 显示状态数据
+        suppressed: 是否抑制通知（短任务、已聚焦等）
+        reason: 更新原因（用于调试）
+    """
+
+    pane_id: str
+    display_state: DisplayState
+    suppressed: bool = False
+    reason: str = ""
+
+    def to_dict(self) -> dict:
+        """转换为字典（用于 WebSocket 广播）"""
+        return {
+            "pane_id": self.pane_id,
+            "display_state": self.display_state.to_dict(),
+            "suppressed": self.suppressed,
+            "reason": self.reason,
+        }
+
+
 # 状态快照类型，用于谓词函数
 @dataclass
 class StateSnapshot:

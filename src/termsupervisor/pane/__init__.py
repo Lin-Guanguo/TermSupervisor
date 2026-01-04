@@ -23,6 +23,7 @@ from .queue import ActorQueue, EventQueue
 from .state_machine import PaneStateMachine
 from .types import (
     DisplayState,
+    DisplayUpdate,
     HookEvent,
     StateChange,
     StateHistoryEntry,
@@ -38,6 +39,7 @@ __all__ = [
     "StateChange",
     "StateHistoryEntry",
     "DisplayState",
+    "DisplayUpdate",
     "StateSnapshot",
     "TransitionRule",
     # Predicates

@@ -5,6 +5,7 @@ import asyncio
 import pytest
 
 from termsupervisor.pane import (
+    DisplayUpdate,
     HookEvent,
     StateManager,
     TaskStatus,
@@ -88,7 +89,7 @@ class TestEventProcessing:
         result = manager.enqueue(event)
         assert result is True
 
-        count = await manager.process_queued()
+        count, updates = await manager.process_queued()
         assert count == 1
 
         assert manager.get_status("test-pane") == TaskStatus.RUNNING
@@ -184,23 +185,10 @@ class TestLongRunningCheck:
 
 
 class TestCallbacks:
-    """回调测试"""
+    """回调测试 (Phase 3.3: 改用返回值)"""
 
-    async def test_display_change_callback(self, manager):
-        """显示变化回调"""
-        changes = []
-
-        def callback(pane_id, display_state, suppressed, reason):
-            changes.append(
-                {
-                    "pane_id": pane_id,
-                    "status": display_state.status,
-                    "suppressed": suppressed,
-                }
-            )
-
-        manager.set_on_display_change(callback)
-
+    async def test_process_queued_returns_updates(self, manager):
+        """process_queued 返回 DisplayUpdate（替代回调）"""
         manager.enqueue(
             HookEvent(
                 source="shell",
@@ -209,10 +197,78 @@ class TestCallbacks:
                 data={"command": "ls"},
             )
         )
-        await manager.process_queued()
+        count, updates = await manager.process_queued()
 
-        assert len(changes) == 1
-        assert changes[0]["status"] == TaskStatus.RUNNING
+        assert len(updates) == 1
+        assert updates[0].display_state.status == TaskStatus.RUNNING
+        assert updates[0].pane_id == "test-pane"
+
+
+class TestProcessQueuedReturnValue:
+    """process_queued 返回值测试 (Phase 3.2)"""
+
+    async def test_process_queued_returns_display_updates(self, manager):
+        """process_queued 返回 DisplayUpdate 列表"""
+        manager.enqueue(
+            HookEvent(
+                source="shell",
+                pane_id="test-pane",
+                event_type="command_start",
+                data={"command": "ls"},
+            )
+        )
+
+        result = await manager.process_queued()
+
+        # result 现在是 (count, updates) 元组
+        count, updates = result
+        assert count == 1
+        assert len(updates) == 1
+        assert updates[0].pane_id == "test-pane"
+        assert updates[0].display_state.status == TaskStatus.RUNNING
+
+    async def test_process_queued_no_update_for_content_events(self, manager):
+        """content 事件不返回 DisplayUpdate"""
+        manager.enqueue(
+            HookEvent(
+                source="content",
+                pane_id="test-pane",
+                event_type="update",
+                data={"content": "test", "content_hash": "hash"},
+            )
+        )
+
+        count, updates = await manager.process_queued()
+
+        assert count == 1  # 事件被处理
+        assert len(updates) == 0  # 但不产生 DisplayUpdate
+
+    async def test_process_queued_multiple_updates(self, manager):
+        """多个事件返回多个 DisplayUpdate"""
+        manager.enqueue(
+            HookEvent(
+                source="shell",
+                pane_id="pane-1",
+                event_type="command_start",
+                data={"command": "ls"},
+            )
+        )
+        manager.enqueue(
+            HookEvent(
+                source="claude-code",
+                pane_id="pane-2",
+                event_type="SessionStart",
+                data={},
+            )
+        )
+
+        count, updates = await manager.process_queued()
+
+        assert count == 2
+        assert len(updates) == 2
+        # 验证两个不同的 pane
+        pane_ids = {u.pane_id for u in updates}
+        assert pane_ids == {"pane-1", "pane-2"}
 
 
 class TestGeneration:
@@ -245,7 +301,7 @@ class TestQueueBehavior:
             )
 
         # 处理所有
-        count = await manager.process_queued()
+        count, updates = await manager.process_queued()
         assert count == 5
 
 
@@ -399,3 +455,74 @@ class TestQueuePriority:
         # 应该合并了 content1（保留 content2 因为它在 command_start 之前）
         assert merged == 1
         assert len(queue) == 3
+
+
+class TestDisplayUpdate:
+    """DisplayUpdate 数据类测试"""
+
+    def test_display_update_structure(self):
+        """DisplayUpdate 基本结构"""
+        from termsupervisor.pane import DisplayState
+
+        display_state = DisplayState(
+            status=TaskStatus.RUNNING,
+            source="shell",
+            description="执行: ls",
+            state_id=1,
+        )
+        update = DisplayUpdate(
+            pane_id="test-pane",
+            display_state=display_state,
+            suppressed=False,
+            reason="state_change",
+        )
+
+        assert update.pane_id == "test-pane"
+        assert update.display_state.status == TaskStatus.RUNNING
+        assert update.suppressed is False
+        assert update.reason == "state_change"
+
+    def test_display_update_suppressed(self):
+        """DisplayUpdate 带 suppressed 标记"""
+        from termsupervisor.pane import DisplayState
+
+        display_state = DisplayState(
+            status=TaskStatus.DONE,
+            source="shell",
+            description="命令完成",
+            state_id=2,
+        )
+        update = DisplayUpdate(
+            pane_id="test-pane",
+            display_state=display_state,
+            suppressed=True,
+            reason="短任务，不通知",
+        )
+
+        assert update.suppressed is True
+        assert update.reason == "短任务，不通知"
+
+    def test_display_update_to_dict(self):
+        """DisplayUpdate to_dict 方法"""
+        from termsupervisor.pane import DisplayState
+
+        display_state = DisplayState(
+            status=TaskStatus.FAILED,
+            source="shell",
+            description="失败 (exit=1)",
+            state_id=3,
+        )
+        update = DisplayUpdate(
+            pane_id="test-pane",
+            display_state=display_state,
+            suppressed=False,
+            reason="command_end",
+        )
+
+        d = update.to_dict()
+        assert d["pane_id"] == "test-pane"
+        assert d["suppressed"] is False
+        assert d["reason"] == "command_end"
+        # display_state 也应该被序列化
+        assert "display_state" in d
+        assert d["display_state"]["status"] == "failed"

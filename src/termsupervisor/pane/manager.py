@@ -12,13 +12,17 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from ..config import LONG_RUNNING_THRESHOLD_SECONDS
+from ..config import (
+    LONG_RUNNING_THRESHOLD_SECONDS,
+    NOTIFICATION_MIN_DURATION_SECONDS,
+    QUIET_COMPLETION_THRESHOLD_SECONDS,
+)
 from ..core.ids import normalize_id
 from ..telemetry import get_logger, metrics
 from .pane import Pane
 from .queue import EventQueue
 from .state_machine import PaneStateMachine
-from .types import DisplayState, HookEvent, TaskStatus
+from .types import DisplayState, DisplayUpdate, HookEvent, StateChange, TaskStatus
 
 if TYPE_CHECKING:
     from ..timer import Timer
@@ -51,8 +55,13 @@ class StateManager:
         """
         self._timer = timer
         self._machines: dict[str, PaneStateMachine] = {}
-        self._panes: dict[str, Pane] = {}
+        self._panes: dict[str, Pane] = {}  # Phase 3.5: 将被删除
         self._queues: dict[str, EventQueue] = {}
+
+        # Phase 3.4: 显示状态直接存储在 StateManager
+        self._display_states: dict[str, DisplayState] = {}
+        self._content: dict[str, str] = {}
+        self._content_hash: dict[str, str] = {}
 
         # 回调
         self._on_display_change: OnDisplayChangeCallback | None = None
@@ -116,27 +125,33 @@ class StateManager:
         # 初始化 generation
         self._pane_generations[pane_id] = 1
 
-        # 创建状态机（不再设置回调，StateManager 直接调用）
+        # 创建状态机
         machine = PaneStateMachine(
             pane_id=pane_id,
             pane_generation=self._pane_generations[pane_id],
         )
 
-        # 创建显示层
+        # Phase 3.4: 直接初始化显示状态
+        self._display_states[pane_id] = DisplayState(
+            status=TaskStatus.IDLE,
+            source="shell",
+            description="",
+            state_id=0,
+        )
+        self._content[pane_id] = ""
+        self._content_hash[pane_id] = ""
+
+        # Phase 3.5: Pane 将被删除，暂时保留用于兼容
         pane = Pane(
             pane_id=pane_id,
             timer=self._timer,
             focus_checker=self._focus_checker,
         )
 
-        # 绑定回调：Pane → 外部（保留，用于通知 HookManager/Web）
-        pane.set_on_display_change(lambda state: self._on_pane_display_change(pane_id, state))
-
         # 创建队列
         queue = EventQueue(pane_id)
         queue.set_current_generation(self._pane_generations[pane_id])
         queue.set_current_state_id(machine.state_id)
-        # 绑定队列调试回调
         if self._on_debug_event:
             queue.set_on_debug_event(self._on_debug_event)
 
@@ -223,14 +238,18 @@ class StateManager:
         queue = self._queues[pane_id]
         return queue.enqueue_event(event)
 
-    async def process_queued(self, pane_id: str | None = None) -> int:
+    async def process_queued(
+        self, pane_id: str | None = None
+    ) -> tuple[int, list[DisplayUpdate]]:
         """处理队列中的事件
 
         Args:
             pane_id: 指定 pane_id 只处理该 pane，None 处理所有
 
         Returns:
-            处理的事件数
+            (count, updates) 元组：
+            - count: 处理的事件数
+            - updates: DisplayUpdate 列表（仅状态变化事件，不含 content 事件）
         """
         if pane_id:
             pane_ids = [normalize_id(pane_id)]
@@ -238,6 +257,8 @@ class StateManager:
             pane_ids = list(self._queues.keys())
 
         total = 0
+        updates: list[DisplayUpdate] = []
+
         for pid in pane_ids:
             queue = self._queues.get(pid)
             if not queue or queue.is_processing:
@@ -248,14 +269,16 @@ class StateManager:
                 while not queue.is_empty:
                     event = queue.dequeue()
                     if event:
-                        await self._process_event(pid, event)
+                        update = await self._process_event(pid, event)
                         total += 1
+                        if update:
+                            updates.append(update)
             finally:
                 queue.set_processing(False)
 
-        return total
+        return total, updates
 
-    async def _process_event(self, pane_id: str, event: HookEvent) -> bool:
+    async def _process_event(self, pane_id: str, event: HookEvent) -> DisplayUpdate | None:
         """处理单个事件
 
         Args:
@@ -263,30 +286,41 @@ class StateManager:
             event: Hook 事件
 
         Returns:
-            是否成功处理（发生了状态变化）
+            DisplayUpdate 如果发生状态变化，None 如果无变化或是 content 事件
         """
         machine = self._machines.get(pane_id)
-        pane = self._panes.get(pane_id)
-
-        if not machine or not pane:
-            return False
+        if not machine:
+            return None
 
         pane_short = pane_id[:8]
 
-        # content.changed / content.update: 仅更新 Pane 内容，不触发状态转换
+        # content.changed / content.update: 仅更新内容，不触发状态转换
         # 这是 Render Pipeline 的一部分，与 Event System 独立
         if event.signal in ("content.changed", "content.update"):
             content = event.data.get("content", "")
             content_hash = event.data.get("content_hash", "")
-            pane.update_content(content, content_hash)
-            # 内容事件不触发调试事件（太频繁）
-            return True
+            # Phase 3.4: 直接更新内容存储
+            self._content[pane_id] = content
+            self._content_hash[pane_id] = content_hash
+            if pane_id in self._display_states:
+                self._display_states[pane_id].content_hash = content_hash
+            # 兼容：同时更新 Pane（Phase 3.5 删除）
+            pane = self._panes.get(pane_id)
+            if pane:
+                pane.update_content(content, content_hash)
+            return None
 
         # 其他事件转发给状态机（Event System）
         change = machine.process(event)
 
         if change:
-            pane.handle_state_change(change)
+            # Phase 3.4: 直接更新显示状态
+            display_state = self._update_display_state(pane_id, change)
+
+            # 兼容：同时更新 Pane（Phase 3.5 删除）
+            pane = self._panes.get(pane_id)
+            if pane:
+                pane.handle_state_change(change)
 
             # 更新队列的 state_id
             queue = self._queues.get(pane_id)
@@ -295,14 +329,83 @@ class StateManager:
 
             # 发送调试事件
             self._emit_debug_event(pane_id, event.signal, "ok", state_id=machine.state_id)
+
+            # 计算通知抑制
+            suppressed, reason = self._should_suppress_notification(pane_id)
+            return DisplayUpdate(
+                pane_id=pane_id,
+                display_state=display_state,
+                suppressed=suppressed,
+                reason=reason if suppressed else "state_change",
+            )
         else:
             # 获取失败原因
             reason = self._get_last_fail_reason(machine)
             self._emit_debug_event(
                 pane_id, event.signal, "fail", reason=reason, state_id=machine.state_id
             )
+            return None
 
-        return change is not None
+    def _update_display_state(self, pane_id: str, change: StateChange) -> DisplayState:
+        """更新显示状态 (Phase 3.4)
+
+        Args:
+            pane_id: pane 标识
+            change: 状态变化
+
+        Returns:
+            更新后的 DisplayState
+        """
+        # 计算 quiet_completion（短任务不闪烁）
+        quiet_completion = False
+        if change.new_status in {TaskStatus.DONE, TaskStatus.FAILED}:
+            if change.running_duration < QUIET_COMPLETION_THRESHOLD_SECONDS:
+                quiet_completion = True
+
+        display_state = DisplayState(
+            status=change.new_status,
+            source=change.new_source,
+            description=change.description,
+            state_id=change.state_id,
+            started_at=change.started_at,
+            running_duration=change.running_duration,
+            content_hash=self._content_hash.get(pane_id, ""),
+            recently_finished=False,
+            quiet_completion=quiet_completion,
+        )
+        self._display_states[pane_id] = display_state
+        return display_state
+
+    def _should_suppress_notification(self, pane_id: str) -> tuple[bool, str]:
+        """判断是否应抑制通知 (Phase 3.4)
+
+        条件：
+        1. 运行时长 < 3s（短任务）
+        2. pane 正在 focus
+
+        Returns:
+            (是否抑制, 抑制原因)
+        """
+        display_state = self._display_states.get(pane_id)
+        if not display_state:
+            return False, ""
+
+        status = display_state.status
+
+        # 只对 DONE/FAILED 判断
+        if status not in {TaskStatus.DONE, TaskStatus.FAILED}:
+            return False, ""
+
+        # 条件 1: 短任务
+        duration = display_state.running_duration
+        if duration < NOTIFICATION_MIN_DURATION_SECONDS:
+            return True, f"duration={duration:.1f}s"
+
+        # 条件 2: 正在 focus
+        if self._focus_checker and self._focus_checker(pane_id):
+            return True, "focused"
+
+        return False, ""
 
     def _get_last_fail_reason(self, machine: PaneStateMachine) -> str:
         """从状态机历史获取最后一次失败原因"""
@@ -521,6 +624,10 @@ class StateManager:
         self._panes.pop(pane_id, None)
         self._queues.pop(pane_id, None)
         self._pane_generations.pop(pane_id, None)
+        # Phase 3.4: 清理新增的存储
+        self._display_states.pop(pane_id, None)
+        self._content.pop(pane_id, None)
+        self._content_hash.pop(pane_id, None)
 
         logger.debug(f"[StateManager] Removed pane: {pane_id[:8]}")
 

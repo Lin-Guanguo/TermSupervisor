@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from ..config import METRICS_ENABLED
-from ..pane import DisplayState, HookEvent, StateManager, TaskStatus
+from ..pane import DisplayState, DisplayUpdate, HookEvent, StateManager, TaskStatus
 from ..telemetry import get_logger, metrics
 
 if TYPE_CHECKING:
@@ -65,9 +65,7 @@ class HookManager:
         self._timer = timer
         self._state_manager = state_manager or StateManager(timer=timer)
         self._on_change: StatusChangeCallback | None = None
-
-        # 绑定内部回调
-        self._state_manager.set_on_display_change(self._on_display_change)
+        # Phase 3.3: 不再使用回调机制，改用 process_event() 返回值
 
     # === 配置 ===
 
@@ -96,29 +94,6 @@ class HookManager:
                 event_dict 包含: pane_id, signal, result, reason, state_id
         """
         self._state_manager.set_on_debug_event(callback)
-
-    def _on_display_change(
-        self, pane_id: str, display_state: DisplayState, suppressed: bool, reason: str
-    ) -> None:
-        """内部显示变化回调"""
-        if self._on_change:
-            import asyncio
-
-            coro = self._on_change(
-                pane_id,
-                display_state.status,
-                display_state.description,
-                display_state.source,
-                suppressed,
-            )
-            # 如果回调是 async 函数，需要创建任务来执行
-            if asyncio.iscoroutine(coro):
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(coro)
-                except RuntimeError:
-                    # 没有运行的事件循环，直接运行
-                    asyncio.run(coro)
 
     # === 事件处理 ===
 
@@ -168,9 +143,43 @@ class HookManager:
 
         # 入队并处理
         if self._state_manager.enqueue(event):
-            await self._state_manager.process_queued(event.pane_id)
+            count, updates = await self._state_manager.process_queued(event.pane_id)
+
+            # Phase 3.3: 使用返回值直接调用回调（不依赖 Pane 回调链）
+            for update in updates:
+                self._notify_change(update)
+
             return True
         return False
+
+    def _notify_change(self, update: DisplayUpdate) -> None:
+        """通知状态变更
+
+        基于 DisplayUpdate 调用 _on_change 回调。
+
+        Args:
+            update: DisplayUpdate 实例
+        """
+        if not self._on_change:
+            return
+
+        import asyncio
+
+        coro = self._on_change(
+            update.pane_id,
+            update.display_state.status,
+            update.display_state.description,
+            update.display_state.source,
+            update.suppressed,
+        )
+        # 如果回调是 async 函数，需要创建任务来执行
+        if asyncio.iscoroutine(coro):
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(coro)
+            except RuntimeError:
+                # 没有运行的事件循环，直接运行
+                asyncio.run(coro)
 
     async def emit_event(
         self,
