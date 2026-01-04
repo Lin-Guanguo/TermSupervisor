@@ -1315,16 +1315,16 @@
 
     <script>
         let ws;
-        let currentLayout = { windows: [], updated_sessions: [], pane_statuses: {} };
+        let currentLayout = { windows: [], updated_panes: [], pane_statuses: {} };
         let tabsPerRow = 4; // 默认每行4个tab
 
-        // 规范化 session_id，提取纯 UUID 部分
+        // 规范化 pane_id，提取纯 UUID 部分
         // iTerm2 的 $ITERM_SESSION_ID 格式为 "w0t1p0:UUID"
-        function normalizeSessionId(sessionId) {
-            if (sessionId && sessionId.includes(':')) {
-                return sessionId.split(':').pop();
+        function normalizePaneId(paneId) {
+            if (paneId && paneId.includes(':')) {
+                return paneId.split(':').pop();
             }
-            return sessionId;
+            return paneId;
         }
 
         // Copy to clipboard and show toast
@@ -1360,9 +1360,9 @@
         const tooltipProcess = document.getElementById('tooltipProcess');
         let tooltipTimeout = null;
 
-        function showPaneTooltip(sessionId, e) {
+        function showPaneTooltip(paneId, e) {
             const statuses = currentLayout.pane_statuses || {};
-            const status = statuses[sessionId] || {};
+            const status = statuses[paneId] || {};
             const path = status.path || '-';
             const jobName = status.job_name || '-';
 
@@ -1424,14 +1424,14 @@
             clearAllNotifications();
         });
 
-        function showToast(status, title, body, sessionId = null) {
+        function showToast(status, title, body, paneId = null) {
             const notification = {
                 id: Date.now(),
                 status,
                 title,
                 body,
                 time: new Date(),
-                sessionId
+                paneId
             };
 
             notifications.unshift(notification);
@@ -1460,7 +1460,7 @@
             const item = document.createElement('div');
             item.className = `notification-item${n.id === selectedNotificationId ? ' selected' : ''}${isNew ? ' new' : ''}`;
             item.dataset.notificationId = n.id;
-            item.dataset.sessionId = n.sessionId || '';
+            item.dataset.paneId = n.paneId || '';
             item.innerHTML = `
                 <div class="notification-item-content">
                     <div class="notification-item-header">
@@ -1476,7 +1476,7 @@
             // 绑定事件
             item.addEventListener('click', (e) => {
                 if (e.target.closest('.notification-delete-btn')) return;
-                selectNotification(n.id, n.sessionId);
+                selectNotification(n.id, n.paneId);
             });
             item.querySelector('.notification-delete-btn').addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -1527,11 +1527,11 @@
             renderNotifications();
         }
 
-        // 为指定 session 的所有通知设置自动消失时间
-        function scheduleAutoDismissForSession(sessionId) {
+        // 为指定 pane 的所有通知设置自动消失时间
+        function scheduleAutoDismissForPane(paneId) {
             const dismissAt = Date.now() + NOTIFICATION_AUTO_DISMISS_MS;
             notifications.forEach(n => {
-                if (n.sessionId === sessionId && !n.autoDismissAt) {
+                if (n.paneId === paneId && !n.autoDismissAt) {
                     n.autoDismissAt = dismissAt;
                 }
             });
@@ -1557,15 +1557,15 @@
 
         let selectedNotificationId = null;
 
-        function selectNotification(id, sessionId) {
+        function selectNotification(id, paneId) {
             selectedNotificationId = id;
             // 更新选中状态
             notificationList.querySelectorAll('.notification-item').forEach(item => {
                 item.classList.toggle('selected', parseInt(item.dataset.notificationId) === id);
             });
-            // 如果有 sessionId，激活对应的 pane
-            if (sessionId) {
-                ws.send(JSON.stringify({action: 'activate', session_id: sessionId}));
+            // 如果有 paneId，激活对应的 pane
+            if (paneId) {
+                ws.send(JSON.stringify({action: 'activate', pane_id: paneId}));
             }
         }
 
@@ -1606,13 +1606,13 @@
             document.getElementById('tabsPerRow').value = tabsPerRow;
         }
 
-        // 追踪 session 更新状态
-        // { session_id: { firstUpdate: timestamp, lastUpdate: timestamp, isLongRunning: bool } }
-        let sessionUpdateTracker = {};
+        // 追踪 pane 更新状态
+        // { pane_id: { firstUpdate: timestamp, lastUpdate: timestamp, isLongRunning: bool } }
+        let paneUpdateTracker = {};
         const LONG_RUNNING_THRESHOLD = 15000; // 15 秒
         const UPDATE_TIMEOUT = 6000; // 6 秒无更新认为停止（2个轮询周期）
 
-        // 需要显示蓝色的 session（长时间任务已完成）
+        // 需要显示蓝色的 pane（长时间任务已完成）
         let longRunningCompleted = new Set();
 
         // 隐藏的 tabs（按 window_id 分组）
@@ -1785,7 +1785,7 @@
                 const data = JSON.parse(event.data);
                 // 区分消息类型
                 if (data.type === 'activate_result') {
-                    console.log('Activate result:', data.session_id, data.success);
+                    console.log('Activate result:', data.pane_id, data.success);
                     return;
                 }
                 if (data.type === 'rename_result') {
@@ -1814,11 +1814,11 @@
                 }
                 // 布局更新
                 currentLayout = data;
-                updateSessionTracker(data.updated_sessions || [], data.active_session_id);
+                updatePaneTracker(data.updated_panes || [], data.active_pane_id);
                 render();
                 // 刷新有更新的 pane 的 SVG
-                if (data.updated_sessions && data.updated_sessions.length > 0) {
-                    refreshUpdatedPanes(data.updated_sessions);
+                if (data.updated_panes && data.updated_panes.length > 0) {
+                    refreshUpdatedPanes(data.updated_panes);
                 }
             };
         }
@@ -1828,8 +1828,8 @@
             const { pane_id, status, status_color, reason, source,
                     needs_notification, needs_attention, is_running, display,
                     window_name, tab_name, pane_name } = data;
-            // 规范化 pane_id，确保与布局数据中的 session_id 格式一致
-            const normalizedPaneId = normalizeSessionId(pane_id);
+            // 规范化 pane_id，确保与布局数据中的 pane_id 格式一致
+            const normalizedPaneId = normalizePaneId(pane_id);
 
             // 更新 pane_statuses 缓存（使用规范化后的 ID 作为 key）
             if (!currentLayout.pane_statuses) {
@@ -1854,9 +1854,9 @@
                 showToast(status, title, reason, normalizedPaneId);
             }
 
-            // 状态变为 IDLE 时，为该 session 的所有通知设置自动消失
+            // 状态变为 IDLE 时，为该 pane 的所有通知设置自动消失
             if (prevStatus !== status && status === 'idle') {
-                scheduleAutoDismissForSession(normalizedPaneId);
+                scheduleAutoDismissForPane(normalizedPaneId);
             }
 
             previousStatuses[normalizedPaneId] = status;
@@ -1865,30 +1865,30 @@
             render();
         }
 
-        // 更新 session 追踪器
-        function updateSessionTracker(updatedSessions, activeSessionId) {
+        // 更新 pane 追踪器
+        function updatePaneTracker(updatedPanes, activePaneId) {
             const now = Date.now();
 
-            // 更新有更新的 session
-            updatedSessions.forEach(sessionId => {
+            // 更新有更新的 pane
+            updatedPanes.forEach(paneId => {
                 // 如果之前是蓝色状态，现在又有更新了，清除蓝色状态
-                if (longRunningCompleted.has(sessionId)) {
-                    longRunningCompleted.delete(sessionId);
+                if (longRunningCompleted.has(paneId)) {
+                    longRunningCompleted.delete(paneId);
                 }
 
-                if (!sessionUpdateTracker[sessionId]) {
-                    sessionUpdateTracker[sessionId] = {
+                if (!paneUpdateTracker[paneId]) {
+                    paneUpdateTracker[paneId] = {
                         firstUpdate: now,
                         lastUpdate: now
                     };
                 } else {
-                    sessionUpdateTracker[sessionId].lastUpdate = now;
+                    paneUpdateTracker[paneId].lastUpdate = now;
                 }
             });
 
-            // 检查停止更新的 session
-            Object.keys(sessionUpdateTracker).forEach(sessionId => {
-                const tracker = sessionUpdateTracker[sessionId];
+            // 检查停止更新的 pane
+            Object.keys(paneUpdateTracker).forEach(paneId => {
+                const tracker = paneUpdateTracker[paneId];
                 const timeSinceLastUpdate = now - tracker.lastUpdate;
                 const totalDuration = tracker.lastUpdate - tracker.firstUpdate;
 
@@ -1896,22 +1896,22 @@
                 if (timeSinceLastUpdate > UPDATE_TIMEOUT) {
                     // 如果持续时间超过阈值，加入蓝色列表
                     if (totalDuration >= LONG_RUNNING_THRESHOLD) {
-                        longRunningCompleted.add(sessionId);
+                        longRunningCompleted.add(paneId);
                     }
                     // 清除追踪器
-                    delete sessionUpdateTracker[sessionId];
+                    delete paneUpdateTracker[paneId];
                 }
             });
         }
 
-        // 判断 session 是否正在持续更新（显示绿色闪烁）
-        function isUpdating(sessionId) {
-            return sessionUpdateTracker.hasOwnProperty(sessionId);
+        // 判断 pane 是否正在持续更新（显示绿色闪烁）
+        function isUpdating(paneId) {
+            return paneUpdateTracker.hasOwnProperty(paneId);
         }
 
-        // 判断 session 是否是已完成的长时间任务（显示蓝色）
-        function isLongRunningCompleted(sessionId) {
-            return longRunningCompleted.has(sessionId);
+        // 判断 pane 是否是已完成的长时间任务（显示蓝色）
+        function isLongRunningCompleted(paneId) {
+            return longRunningCompleted.has(paneId);
         }
 
         // 是否正在 hover 下拉菜单
@@ -2100,7 +2100,7 @@
 
             const paneEl = document.createElement('div');
             paneEl.className = 'pane';
-            paneEl.dataset.sessionId = paneData.session_id;
+            paneEl.dataset.paneId = paneData.pane_id;
 
             const left = ((paneData.x - minX) / totalWidth) * 100;
             const top = ((paneData.y - minY) / totalHeight) * 100;
@@ -2130,8 +2130,8 @@
             // 使用 object 标签加载 SVG
             const svgObject = document.createElement('object');
             svgObject.type = 'image/svg+xml';
-            svgObject.data = `/api/pane/${paneData.session_id}/svg`;
-            svgObject.dataset.sessionId = paneData.session_id;
+            svgObject.data = `/api/pane/${paneData.pane_id}/svg`;
+            svgObject.dataset.paneId = paneData.pane_id;
 
             // Fallback 内容
             const fallbackEl = document.createElement('div');
@@ -2144,17 +2144,17 @@
 
             paneEl.onclick = () => {
                 // 发送激活请求，后端会处理状态清除
-                ws.send(JSON.stringify({action: 'activate', session_id: paneData.session_id}));
+                ws.send(JSON.stringify({action: 'activate', pane_id: paneData.pane_id}));
             };
             paneEl.ondblclick = (e) => {
                 e.stopPropagation();
-                const sessionId = paneData.session_id;
-                copyToClipboard(sessionId, `Copied: ${sessionId.substring(0, 8)}...`);
+                const paneId = paneData.pane_id;
+                copyToClipboard(paneId, `Copied: ${paneId.substring(0, 8)}...`);
             };
-            paneEl.oncontextmenu = (e) => showContextMenu(e, 'session', paneData.session_id, paneData.name);
+            paneEl.oncontextmenu = (e) => showContextMenu(e, 'pane', paneData.pane_id, paneData.name);
 
             // Hover tooltip
-            paneEl.onmouseenter = (e) => showPaneTooltip(paneData.session_id, e);
+            paneEl.onmouseenter = (e) => showPaneTooltip(paneData.pane_id, e);
             paneEl.onmousemove = (e) => updateTooltipPosition(e);
             paneEl.onmouseleave = () => hidePaneTooltip();
 
@@ -2162,19 +2162,19 @@
         }
 
         // 刷新指定 pane 的 SVG（无闪烁）
-        function refreshPaneSvg(sessionId) {
-            const paneEl = document.querySelector(`[data-session-id="${sessionId}"]`);
+        function refreshPaneSvg(paneId) {
+            const paneEl = document.querySelector(`[data-pane-id="${paneId}"]`);
             if (!paneEl) return;
 
             const svgContainer = paneEl.querySelector('.pane-svg-container');
-            const oldSvgObject = svgContainer?.querySelector('object[data-session-id]');
+            const oldSvgObject = svgContainer?.querySelector('object[data-pane-id]');
             if (!svgContainer || !oldSvgObject) return;
 
             // 创建新的 object 元素预加载
             const newSvgObject = document.createElement('object');
             newSvgObject.type = 'image/svg+xml';
-            newSvgObject.data = `/api/pane/${sessionId}/svg?t=${Date.now()}`;
-            newSvgObject.dataset.sessionId = sessionId;
+            newSvgObject.data = `/api/pane/${paneId}/svg?t=${Date.now()}`;
+            newSvgObject.dataset.paneId = paneId;
             newSvgObject.style.position = 'absolute';
             newSvgObject.style.top = '0';
             newSvgObject.style.left = '0';
@@ -2198,9 +2198,9 @@
         }
 
         // 刷新所有有更新的 pane 的 SVG
-        function refreshUpdatedPanes(updatedSessions) {
-            updatedSessions.forEach(sessionId => {
-                refreshPaneSvg(sessionId);
+        function refreshUpdatedPanes(updatedPanes) {
+            updatedPanes.forEach(paneId => {
+                refreshPaneSvg(paneId);
             });
         }
 
@@ -2244,12 +2244,12 @@
         // 上一次的状态，用于检测状态变化发送通知
         let previousStatuses = {};
 
-        // 根据 sessionId 查找 pane 所在的 window/tab 名称
-        function getPaneLocation(sessionId) {
+        // 根据 paneId 查找 pane 所在的 window/tab 名称
+        function getPaneLocation(paneId) {
             for (const window of (currentLayout.windows || [])) {
                 for (const tab of (window.tabs || [])) {
                     for (const pane of (tab.panes || [])) {
-                        if (pane.session_id === sessionId) {
+                        if (pane.pane_id === paneId) {
                             // iTerm2 的 tab 名称通常和第一个 pane 的名称相同
                             // 优先使用 pane.name 作为显示名称
                             return {
@@ -2264,10 +2264,10 @@
             return { windowName: null, tabName: null, paneName: null };
         }
 
-        function updatePaneStatus(paneEl, sessionId, updatedSessions, activeSessionId, paneStatuses) {
-            const shouldBeActive = sessionId === activeSessionId;
-            // 规范化 sessionId，确保与 handleHookStatus 中的 key 一致
-            const normalizedId = normalizeSessionId(sessionId);
+        function updatePaneStatus(paneEl, paneId, updatedPanes, activePaneId, paneStatuses) {
+            const shouldBeActive = paneId === activePaneId;
+            // 规范化 paneId，确保与 handleHookStatus 中的 key 一致
+            const normalizedId = normalizePaneId(paneId);
 
             // 获取状态信息（使用规范化的 ID）
             const statusInfo = paneStatuses[normalizedId] || {};
@@ -2341,8 +2341,8 @@
             }
 
             const container = document.getElementById('windows');
-            const updatedSessions = currentLayout.updated_sessions || [];
-            const activeSessionId = currentLayout.active_session_id || null;
+            const updatedPanes = currentLayout.updated_panes || [];
+            const activePaneId = currentLayout.active_pane_id || null;
             const paneStatuses = currentLayout.pane_statuses || {};
 
             // 获取现有 window 元素
@@ -2373,7 +2373,7 @@
                 const visibleTabs = windowData.tabs.filter(tab => !isTabHidden(windowData.window_id, tab.tab_id));
 
                 // 处理 tabs
-                updateTabs(windowEl, visibleTabs, windowData.window_id, updatedSessions, activeSessionId, paneStatuses);
+                updateTabs(windowEl, visibleTabs, windowData.window_id, updatedPanes, activePaneId, paneStatuses);
             });
 
             // 删除不存在的 window
@@ -2384,7 +2384,7 @@
             });
         }
 
-        function updateTabs(windowEl, tabs, windowId, updatedSessions, activeSessionId, paneStatuses) {
+        function updateTabs(windowEl, tabs, windowId, updatedPanes, activePaneId, paneStatuses) {
             // 获取现有 tab 元素
             const existingTabs = new Map();
             windowEl.querySelectorAll('.tab-display-wrapper').forEach(el => {
@@ -2407,7 +2407,7 @@
                 }
 
                 // 处理 panes
-                updatePanes(tabEl, tabData.panes, updatedSessions, activeSessionId, paneStatuses);
+                updatePanes(tabEl, tabData.panes, updatedPanes, activePaneId, paneStatuses);
             });
 
             // 删除不存在的 tab（包括被隐藏的）
@@ -2418,14 +2418,14 @@
             });
         }
 
-        function updatePanes(tabEl, panes, updatedSessions, activeSessionId, paneStatuses) {
+        function updatePanes(tabEl, panes, updatedPanes, activePaneId, paneStatuses) {
             const panesContainer = tabEl.querySelector('.panes-container');
             if (!panesContainer) return;
 
             // 获取现有 pane 元素
             const existingPanes = new Map();
             panesContainer.querySelectorAll('.pane').forEach(el => {
-                existingPanes.set(el.dataset.sessionId, el);
+                existingPanes.set(el.dataset.paneId, el);
             });
 
             const newPaneIds = new Set();
@@ -2440,16 +2440,16 @@
                 panesContainer.style.position = 'relative';
 
                 panes.forEach((paneData) => {
-                    newPaneIds.add(paneData.session_id);
-                    let paneEl = existingPanes.get(paneData.session_id);
+                    newPaneIds.add(paneData.pane_id);
+                    let paneEl = existingPanes.get(paneData.pane_id);
 
                     if (paneEl) {
                         // 只更新状态，不重建元素
-                        updatePaneStatus(paneEl, paneData.session_id, updatedSessions, activeSessionId, paneStatuses);
+                        updatePaneStatus(paneEl, paneData.pane_id, updatedPanes, activePaneId, paneStatuses);
                     } else {
                         // 创建新 pane
                         paneEl = createPaneElement(paneData, layoutInfo);
-                        updatePaneStatus(paneEl, paneData.session_id, updatedSessions, activeSessionId, paneStatuses);
+                        updatePaneStatus(paneEl, paneData.pane_id, updatedPanes, activePaneId, paneStatuses);
                         panesContainer.appendChild(paneEl);
                     }
                 });
@@ -2476,7 +2476,7 @@
                 if (!newPaneIds.has(id)) {
                     el.remove();
                     // 清理状态缓存（使用规范化的 ID）
-                    const normalizedId = normalizeSessionId(id);
+                    const normalizedId = normalizePaneId(id);
                     delete previousStatuses[normalizedId];
                 }
             });

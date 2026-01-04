@@ -9,8 +9,8 @@ from fastapi.templating import Jinja2Templates
 
 from termsupervisor.adapters.iterm2 import ITerm2Client
 from termsupervisor.adapters.iterm2.models import LayoutData
-from termsupervisor.render import TerminalRenderer
-from termsupervisor.supervisor import TermSupervisor
+from termsupervisor.render import TerminalRenderer, RenderPipeline
+from termsupervisor.render.types import LayoutUpdate
 from termsupervisor.web.handlers import MessageHandler
 
 if TYPE_CHECKING:
@@ -20,9 +20,9 @@ if TYPE_CHECKING:
 class WebServer:
     """WebSocket 服务器"""
 
-    def __init__(self, supervisor: TermSupervisor, iterm_client: ITerm2Client):
+    def __init__(self, pipeline: RenderPipeline, iterm_client: ITerm2Client):
         self.app = FastAPI(title="TermSupervisor")
-        self.supervisor = supervisor
+        self.pipeline = pipeline
         self.iterm_client = iterm_client
         self.clients: list[WebSocket] = []
         self._hook_receiver: HookReceiver | None = None
@@ -35,13 +35,13 @@ class WebServer:
 
         self._handler = MessageHandler(
             iterm_client=iterm_client,
-            supervisor=supervisor,
+            pipeline=pipeline,
             broadcast=self.broadcast,
             web_server=self,
         )
 
         self._setup_routes()
-        supervisor.on_update(self._on_layout_update)
+        pipeline.on_update(self._on_layout_update)
 
     def setup_hook_receiver(self, receiver: "HookReceiver") -> None:
         """设置 Hook 接收器"""
@@ -66,19 +66,19 @@ class WebServer:
             # 没有运行中的事件循环，忽略
             pass
 
-    async def _on_layout_update(self, layout: LayoutData):
+    async def _on_layout_update(self, update: LayoutUpdate):
         """布局更新回调"""
-        await self.broadcast(self.supervisor.get_layout_dict())
+        await self.broadcast(self.pipeline.get_layout_dict())
 
     def _setup_routes(self):
         @self.app.get("/", response_class=HTMLResponse)
         async def index(request: Request):
             return self.templates.TemplateResponse("index.html", {"request": request})
 
-        @self.app.get("/api/pane/{session_id}/svg")
-        async def get_pane_svg(session_id: str):
+        @self.app.get("/api/pane/{pane_id}/svg")
+        async def get_pane_svg(pane_id: str):
             """获取指定 pane 的 SVG 渲染图。"""
-            session = await self.iterm_client.get_session_by_id(session_id)
+            session = await self.iterm_client.get_session_by_id(pane_id)
             if not session:
                 return Response(
                     content="Session not found", status_code=404, media_type="text/plain"
@@ -125,9 +125,9 @@ class WebServer:
             )
             return {"states": snapshots, "total": total}
 
-        @self.app.get("/api/debug/state/{session_id}")
+        @self.app.get("/api/debug/state/{pane_id}")
         async def get_debug_state(
-            session_id: str,
+            pane_id: str,
             max_history: int = 30,
             max_pending_events: int = 10,
         ):
@@ -142,7 +142,7 @@ class WebServer:
 
             history_limit = max_history if max_history > 0 else None
             snapshot = hook_manager.get_debug_state(
-                session_id,
+                pane_id,
                 max_history=history_limit,
                 max_pending_events=max_pending_events,
             )
@@ -159,7 +159,7 @@ class WebServer:
             await websocket.accept()
             self.clients.append(websocket)
             try:
-                await websocket.send_json(self.supervisor.get_layout_dict())
+                await websocket.send_json(self.pipeline.get_layout_dict())
                 while True:
                     data = await websocket.receive_text()
                     await self._handler.handle(websocket, data)

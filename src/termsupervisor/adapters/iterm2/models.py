@@ -12,7 +12,7 @@ from datetime import datetime
 class PaneInfo:
     """Pane 信息"""
 
-    session_id: str
+    pane_id: str  # renamed from session_id for consistency
     name: str
     index: int
     x: float
@@ -48,8 +48,8 @@ class LayoutData:
     """完整布局数据"""
 
     windows: list[WindowInfo] = field(default_factory=list)
-    updated_sessions: list[str] = field(default_factory=list)
-    active_session_id: str | None = None  # 当前 focus 的 session
+    updated_panes: list[str] = field(default_factory=list)  # renamed from updated_sessions
+    active_pane_id: str | None = None  # renamed from active_session_id
 
     def to_dict(self) -> dict:
         """转换为字典"""
@@ -60,7 +60,7 @@ class LayoutData:
 class PaneSnapshot:
     """Pane 内容快照"""
 
-    session_id: str
+    pane_id: str  # renamed from session_id
     index: int
     content: str
     updated_at: datetime = field(default_factory=datetime.now)

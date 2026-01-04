@@ -30,7 +30,7 @@ async def traverse_node(
             return [], width, height
 
         pane = PaneInfo(
-            session_id=node.session_id,
+            pane_id=node.session_id,  # iTerm2's session_id maps to our pane_id
             name=display_name,
             index=0,  # 稍后统一分配
             x=abs_x,
@@ -88,7 +88,7 @@ async def get_layout(app: iterm2.App, exclude_names: list[str] | None = None) ->
         if current_window and current_window.current_tab:
             current_session = current_window.current_tab.current_session
             if current_session:
-                layout.active_session_id = current_session.session_id
+                layout.active_pane_id = current_session.session_id
     except Exception:
         pass
 

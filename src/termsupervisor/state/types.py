@@ -276,7 +276,7 @@ class HeuristicInput:
     # PromptMonitor gating
     prompt_integration_active: bool = False
     last_prompt_event_at: float | None = None
-    # Content metrics (populated by PaneChange)
+    # Content metrics
     last_change_at: float | None = None
     tail_hash: str = ""
     newline_count: int = 0

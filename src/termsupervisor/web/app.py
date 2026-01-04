@@ -9,16 +9,17 @@ import uvicorn
 from termsupervisor import config
 from termsupervisor.adapters.iterm2 import ITerm2Client
 from termsupervisor.core.ids import normalize_id
+from termsupervisor.render import RenderPipeline
 from termsupervisor.runtime import RuntimeComponents, bootstrap
-from termsupervisor.supervisor import TermSupervisor
+from termsupervisor.state import TaskStatus
 from termsupervisor.web.server import WebServer
 
 logger = logging.getLogger(__name__)
 
 
-def create_app(supervisor: TermSupervisor, iterm_client: ITerm2Client) -> WebServer:
+def create_app(pipeline: RenderPipeline, iterm_client: ITerm2Client) -> WebServer:
     """创建 Web 应用"""
-    return WebServer(supervisor, iterm_client)
+    return WebServer(pipeline, iterm_client)
 
 
 async def setup_hook_system(server: WebServer, connection: iterm2.Connection) -> RuntimeComponents:
@@ -48,7 +49,7 @@ async def setup_hook_system(server: WebServer, connection: iterm2.Connection) ->
     # 设置状态变更回调 -> 广播到前端
     async def on_status_change(pane_id: str, status, reason: str, source: str, suppressed: bool):
         """状态变更时广播到前端"""
-        window_name, tab_name, pane_name = server.supervisor.get_pane_location(pane_id)
+        window_name, tab_name, pane_name = server.pipeline.get_pane_location(pane_id)
 
         needs_notification = status.needs_notification and not suppressed
 
@@ -86,35 +87,54 @@ async def start_server(connection: iterm2.Connection):
     """启动服务器"""
     iterm_client = ITerm2Client(connection)
 
-    supervisor = TermSupervisor(
-        interval=config.INTERVAL,
-        exclude_names=config.EXCLUDE_NAMES,
-        min_changed_lines=config.MIN_CHANGED_LINES,
-        debug=config.DEBUG,
+    pipeline = RenderPipeline(
         iterm_client=iterm_client,
+        exclude_names=config.EXCLUDE_NAMES,
     )
 
-    server = create_app(supervisor, iterm_client)
+    server = create_app(pipeline, iterm_client)
 
     # 初始化 Hook 系统（状态管理的唯一来源）
     components = await setup_hook_system(server, connection)
     print("[HookSystem] Hook 系统已启动 (Shell + Claude Code + iTerm Focus)")
 
-    # 注入 hook_manager 到 supervisor（用于状态获取和 content.changed 事件）
-    supervisor.set_hook_manager(components.hook_manager)
-    supervisor.set_shell_source(components.shell_source)
+    # 设置 pipeline 的状态提供者（用于 get_layout_dict 获取状态信息）
+    def get_pane_status(pane_id: str) -> dict | None:
+        """获取 pane 状态信息"""
+        state = components.hook_manager.get_state(pane_id)
+        if state:
+            status = state.status
+            return {
+                "status": status.value,
+                "status_color": status.color,
+                "status_reason": state.description,
+                "is_running": status.is_running,
+                "needs_notification": status.needs_notification,
+                "needs_attention": status.needs_attention,
+                "display": status.display,
+            }
+        return None
+
+    pipeline.set_status_provider(get_pane_status)
+
+    # 设置 WAITING 状态检查器（用于渲染阈值调整）
+    def check_is_waiting(pane_id: str) -> bool:
+        status = components.hook_manager.get_status(pane_id)
+        return status == TaskStatus.WAITING_APPROVAL
+
+    pipeline.set_waiting_provider(check_is_waiting)
 
     # 启动 Timer（LONG_RUNNING 检查 + Pane 延迟任务）
     timer_task = asyncio.create_task(components.timer.run())
     print("[Timer] Timer 已启动")
 
-    supervisor_task = asyncio.create_task(supervisor.run())
+    pipeline_task = asyncio.create_task(pipeline.run())
 
     # 定期同步 session 列表到 Shell Hook Source
     async def sync_sessions():
         while True:
             try:
-                session_ids = set(supervisor.snapshots.keys())
+                session_ids = pipeline.get_pane_ids()
                 await components.shell_source.sync_sessions(session_ids)
             except Exception as e:
                 logger.error(f"[HookSystem] 同步 sessions 失败: {e}")
@@ -130,9 +150,9 @@ async def start_server(connection: iterm2.Connection):
     try:
         await uvicorn_server.serve()
     finally:
-        supervisor.stop()
+        pipeline.stop()
         components.timer.stop()
-        supervisor_task.cancel()
+        pipeline_task.cancel()
         timer_task.cancel()
         sync_task.cancel()
         await components.stop_sources()

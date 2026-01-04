@@ -1,6 +1,6 @@
 .PHONY: run rerun run-web run-cli stop viewlog taillog loghook logerr debug-states debug-state clean test help
 
-LOG_FILE = server.log
+LOG_FILE = /tmp/termsupervisor.log
 PROC_NAME = termsupervisor
 DEBUG_BASE = http://localhost:8765
 

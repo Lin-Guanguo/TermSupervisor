@@ -1,7 +1,7 @@
 """WebSocket 消息处理器
 
 JSON 格式：
-- {"action": "activate", "session_id": "xxx"}
+- {"action": "activate", "pane_id": "xxx"}
 - {"action": "rename", "type": "pane|tab|window", "id": "xxx", "name": "yyy"}
 - {"action": "create_tab", "window_id": "xxx", "layout": "single|split"}
 - {"action": "debug_subscribe", "subscribe": true|false}
@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from fastapi import WebSocket
 
 from termsupervisor.adapters.iterm2 import ITerm2Client
-from termsupervisor.supervisor import TermSupervisor
+from termsupervisor.render import RenderPipeline
 from termsupervisor.telemetry import get_logger
 
 if TYPE_CHECKING:
@@ -33,7 +33,7 @@ class MessageHandler:
     """
 
     iterm_client: ITerm2Client
-    supervisor: TermSupervisor
+    pipeline: RenderPipeline
     broadcast: Callable[[dict], Awaitable[None]]
     hook_manager: "HookManager | None" = field(default=None)
     web_server: "WebServer | None" = field(default=None)
@@ -69,24 +69,24 @@ class MessageHandler:
     async def _handle_activate(self, websocket: WebSocket, msg: dict):
         """处理激活请求（用户点击 pane）
 
-        JSON 格式: {"action": "activate", "session_id": "xxx"}
+        JSON 格式: {"action": "activate", "pane_id": "xxx"}
         """
-        session_id = msg.get("session_id", "")
-        if not session_id:
-            await websocket.send_json({"type": "error", "message": "Missing session_id"})
+        pane_id = msg.get("pane_id", "")
+        if not pane_id:
+            await websocket.send_json({"type": "error", "message": "Missing pane_id"})
             return
 
         # 通知 HookManager 用户点击事件，清除 DONE/FAILED 状态
         if self.hook_manager:
             await self.hook_manager.emit_event(
                 source="frontend",
-                pane_id=session_id,
+                pane_id=pane_id,
                 event_type="click_pane",
             )
 
-        success = await self.iterm_client.activate_session(session_id)
+        success = await self.iterm_client.activate_session(pane_id)
         await websocket.send_json(
-            {"type": "activate_result", "session_id": session_id, "success": success}
+            {"type": "activate_result", "pane_id": pane_id, "success": success}
         )
 
     async def _handle_rename_action(self, websocket: WebSocket, msg: dict):
@@ -118,8 +118,8 @@ class MessageHandler:
         """处理重命名请求"""
         success = await self.iterm_client.rename_item(msg["type"], msg["id"], msg["name"])
         if success:
-            await self.supervisor.check_updates()
-            await self.broadcast(self.supervisor.get_layout_dict())
+            await self.pipeline.check_updates()
+            await self.broadcast(self.pipeline.get_layout_dict())
         return success
 
     async def _handle_create_tab(self, msg: dict) -> bool:
@@ -127,8 +127,8 @@ class MessageHandler:
         layout = msg.get("layout", "single")
         success = await self.iterm_client.create_tab(msg["window_id"], layout)
         if success:
-            await self.supervisor.check_updates()
-            await self.broadcast(self.supervisor.get_layout_dict())
+            await self.pipeline.check_updates()
+            await self.broadcast(self.pipeline.get_layout_dict())
         return success
 
     async def _handle_debug_subscribe(self, websocket: WebSocket, msg: dict):
