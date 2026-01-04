@@ -114,8 +114,8 @@ class TestEventProcessing:
         result = manager.enqueue(event)
         assert result is False
 
-    async def test_content_update_updates_pane(self, manager):
-        """content.update 更新 Pane 内容"""
+    async def test_content_update_updates_content(self, manager):
+        """content.update 更新内容存储"""
         event = HookEvent(
             source="content",
             pane_id="test-pane",
@@ -126,12 +126,12 @@ class TestEventProcessing:
         manager.enqueue(event)
         await manager.process_queued()
 
-        pane = manager.get_pane("test-pane")
-        assert pane.content == "new content"
-        assert pane.content_hash == "hash123"
+        # Phase 3.4: 使用新的 get_content/get_content_hash 方法
+        assert manager.get_content("test-pane") == "new content"
+        assert manager.get_content_hash("test-pane") == "hash123"
 
-    async def test_content_changed_updates_pane_compat(self, manager):
-        """content.changed（兼容）更新 Pane 内容"""
+    async def test_content_changed_updates_content_compat(self, manager):
+        """content.changed（兼容）更新内容存储"""
         event = HookEvent(
             source="content",
             pane_id="test-pane",
@@ -142,9 +142,9 @@ class TestEventProcessing:
         manager.enqueue(event)
         await manager.process_queued()
 
-        pane = manager.get_pane("test-pane")
-        assert pane.content == "new content"
-        assert pane.content_hash == "hash123"
+        # Phase 3.4: 使用新的 get_content/get_content_hash 方法
+        assert manager.get_content("test-pane") == "new content"
+        assert manager.get_content_hash("test-pane") == "hash123"
 
 class TestLongRunningCheck:
     """LONG_RUNNING 检查测试"""

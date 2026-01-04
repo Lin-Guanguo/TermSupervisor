@@ -479,8 +479,20 @@ class StateManager:
         return self._machines.get(normalize_id(pane_id))
 
     def get_pane(self, pane_id: str) -> Pane | None:
-        """获取 Pane"""
+        """获取 Pane (Phase 3.5: deprecated)"""
         return self._panes.get(normalize_id(pane_id))
+
+    def get_content(self, pane_id: str) -> str:
+        """获取 pane 内容 (Phase 3.4)"""
+        return self._content.get(normalize_id(pane_id), "")
+
+    def get_content_hash(self, pane_id: str) -> str:
+        """获取 pane 内容 hash (Phase 3.4)"""
+        return self._content_hash.get(normalize_id(pane_id), "")
+
+    def get_display_state(self, pane_id: str) -> DisplayState | None:
+        """获取显示状态 (Phase 3.4)"""
+        return self._display_states.get(normalize_id(pane_id))
 
     def get_all_panes(self) -> set[str]:
         """获取所有 pane_id"""
