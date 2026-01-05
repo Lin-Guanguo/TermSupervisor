@@ -6,8 +6,8 @@ Coordinates content polling, change detection, caching, and notifications.
 import asyncio
 import logging
 import os
-from typing import TYPE_CHECKING, Any
 from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any
 
 from termsupervisor import config
 from termsupervisor.analysis import ContentCleaner
