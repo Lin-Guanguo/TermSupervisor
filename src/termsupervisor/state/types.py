@@ -263,28 +263,6 @@ Predicate = Callable[[HookEvent, StateSnapshot], bool]
 
 
 @dataclass
-class HeuristicInput:
-    """Input data for content heuristic analyzer
-
-    Provides pane context and PromptMonitor status for tiered gating.
-    """
-
-    pane_id: str
-    pane_name: str  # Process name or title for whitelist matching
-    current_status: TaskStatus
-    current_source: str
-    # PromptMonitor gating
-    prompt_integration_active: bool = False
-    last_prompt_event_at: float | None = None
-    # Content metrics
-    last_change_at: float | None = None
-    tail_hash: str = ""
-    newline_count: int = 0
-    burst_length: int = 0
-    tail_lines: list[str] = field(default_factory=list)
-
-
-@dataclass
 class TransitionRule:
     """状态流转规则
 
