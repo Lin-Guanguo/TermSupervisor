@@ -15,9 +15,6 @@ POLL_INTERVAL = 1.0  # 内容读取间隔（秒）
 # === 排除配置 ===
 EXCLUDE_NAMES = ["supervisor"]  # 排除的 pane 名称（包含匹配）
 
-# === 调试配置 ===
-DEBUG = True  # 调试模式
-
 # === 用户配置 ===
 USER_NAME_VAR = "user.name"  # 用户自定义名称变量名
 
@@ -49,7 +46,6 @@ FOCUS_DEBOUNCE_SECONDS = 0.3  # iTerm2 focus 防抖时间
 
 # === 内容渲染配置 ===
 QUEUE_REFRESH_LINES = 5  # 中等变化阈值，触发页面刷新
-QUEUE_NEW_RECORD_LINES = 20  # 大变化阈值
 QUEUE_FLUSH_TIMEOUT = 10.0  # 小变化兜底刷新时间（秒）
 WAITING_REFRESH_LINES = 1  # WAITING 状态下刷新阈值（更敏感）
 
