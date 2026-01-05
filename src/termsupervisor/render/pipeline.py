@@ -22,7 +22,6 @@ if TYPE_CHECKING:
     from termsupervisor.adapters.iterm2 import ITerm2Client
     from termsupervisor.adapters.iterm2.client import JobMetadata
     from termsupervisor.adapters.iterm2.models import LayoutData
-    from termsupervisor.hooks.manager import HookManager
 
 logger = logging.getLogger(__name__)
 

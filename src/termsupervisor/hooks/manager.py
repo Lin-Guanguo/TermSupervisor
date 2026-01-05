@@ -33,9 +33,8 @@ LOG_INFO = logging.INFO
 LOG_WARNING = logging.WARNING
 
 # 回调类型
-StatusChangeCallback = Callable[[str, TaskStatus, str, str, bool], Awaitable[None]]
+StatusChangeCallback = Callable[[str, TaskStatus, str, str], Awaitable[None]]
 DebugEventCallback = Callable[[dict], None]
-FocusChecker = Callable[[str], bool]
 
 
 class HookManager:
@@ -78,13 +77,9 @@ class HookManager:
         """设置状态变更回调
 
         Args:
-            callback: 回调函数 (pane_id, status, description, source, suppressed) -> None
+            callback: 回调函数 (pane_id, status, description, source) -> None
         """
         self._on_change = callback
-
-    def set_focus_checker(self, checker: FocusChecker) -> None:
-        """设置 focus 检查函数"""
-        self._state_manager.set_focus_checker(checker)
 
     def set_debug_event_callback(self, callback: DebugEventCallback) -> None:
         """设置调试事件回调
@@ -168,7 +163,6 @@ class HookManager:
             update.display_state.status,
             update.display_state.description,
             update.display_state.source,
-            update.suppressed,
         )
 
     async def emit_event(

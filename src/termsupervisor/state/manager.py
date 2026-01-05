@@ -13,9 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..config import (
     AUTO_DISMISS_DWELL_SECONDS,
-    DISPLAY_DELAY_SECONDS,
     LONG_RUNNING_THRESHOLD_SECONDS,
-    NOTIFICATION_MIN_DURATION_SECONDS,
     QUIET_COMPLETION_THRESHOLD_SECONDS,
     RECENTLY_FINISHED_HINT_SECONDS,
 )
@@ -31,9 +29,8 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 # 回调类型
-OnDisplayChangeCallback = Callable[[str, DisplayState, bool, str], Any]
+OnDisplayChangeCallback = Callable[[str, DisplayState], Any]
 OnDebugEventCallback = Callable[[dict], Any]
-FocusChecker = Callable[[str], bool]
 
 
 class StateManager:
@@ -65,7 +62,6 @@ class StateManager:
         # 回调
         self._on_display_change: OnDisplayChangeCallback | None = None
         self._on_debug_event: OnDebugEventCallback | None = None
-        self._focus_checker: FocusChecker | None = None
 
         # pane generation 跟踪
         self._pane_generations: dict[str, int] = {}
@@ -92,10 +88,6 @@ class StateManager:
         # 同步到已有的队列
         for queue in self._queues.values():
             queue.set_on_debug_event(callback)
-
-    def set_focus_checker(self, checker: FocusChecker) -> None:
-        """设置 focus 检查函数"""
-        self._focus_checker = checker
 
     # === 实例管理 ===
 
@@ -153,8 +145,7 @@ class StateManager:
         if not self._on_display_change:
             return
 
-        suppressed, reason = self._should_suppress_notification(pane_id)
-        self._on_display_change(pane_id, state, suppressed, reason)
+        self._on_display_change(pane_id, state)
 
     def _emit_debug_event(
         self,
@@ -307,13 +298,10 @@ class StateManager:
             if change.new_status in {TaskStatus.DONE, TaskStatus.FAILED}:
                 self._register_auto_dismiss(pane_id, change.state_id)
 
-            # 计算通知抑制
-            suppressed, reason = self._should_suppress_notification(pane_id)
             return DisplayUpdate(
                 pane_id=pane_id,
                 display_state=display_state,
-                suppressed=suppressed,
-                reason=reason if suppressed else "state_change",
+                reason="state_change",
             )
         else:
             # 获取失败原因
@@ -352,37 +340,6 @@ class StateManager:
         )
         self._display_states[pane_id] = display_state
         return display_state
-
-    def _should_suppress_notification(self, pane_id: str) -> tuple[bool, str]:
-        """判断是否应抑制通知 (Phase 3.4)
-
-        条件：
-        1. 运行时长 < 3s（短任务）
-        2. pane 正在 focus
-
-        Returns:
-            (是否抑制, 抑制原因)
-        """
-        display_state = self._display_states.get(pane_id)
-        if not display_state:
-            return False, ""
-
-        status = display_state.status
-
-        # 只对 DONE/FAILED 判断
-        if status not in {TaskStatus.DONE, TaskStatus.FAILED}:
-            return False, ""
-
-        # 条件 1: 短任务
-        duration = display_state.running_duration
-        if duration < NOTIFICATION_MIN_DURATION_SECONDS:
-            return True, f"duration={duration:.1f}s"
-
-        # 条件 2: 正在 focus
-        if self._focus_checker and self._focus_checker(pane_id):
-            return True, "focused"
-
-        return False, ""
 
     def _get_last_fail_reason(self, machine: PaneStateMachine) -> str:
         """从状态机历史获取最后一次失败原因"""

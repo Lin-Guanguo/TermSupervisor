@@ -160,13 +160,12 @@ class TestCallback:
         """状态变更时调用回调"""
         changes = []
 
-        async def callback(pane_id, status, description, source, suppressed):
+        async def callback(pane_id, status, description, source):
             changes.append(
                 {
                     "pane_id": pane_id,
                     "status": status,
                     "source": source,
-                    "suppressed": suppressed,
                 }
             )
 

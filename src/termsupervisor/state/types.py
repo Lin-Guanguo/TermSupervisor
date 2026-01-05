@@ -226,13 +226,11 @@ class DisplayUpdate:
     Attributes:
         pane_id: pane 标识
         display_state: 显示状态数据
-        suppressed: 是否抑制通知（短任务、已聚焦等）
         reason: 更新原因（用于调试）
     """
 
     pane_id: str
     display_state: DisplayState
-    suppressed: bool = False
     reason: str = ""
 
     def to_dict(self) -> dict:
@@ -240,7 +238,6 @@ class DisplayUpdate:
         return {
             "pane_id": self.pane_id,
             "display_state": self.display_state.to_dict(),
-            "suppressed": self.suppressed,
             "reason": self.reason,
         }
 

@@ -52,7 +52,6 @@ STATE_HISTORY_MAX_LENGTH = 30  # 内存中历史记录最大长度
 
 # === 显示层配置 ===
 DISPLAY_DELAY_SECONDS = 5.0  # DONE/FAILED → IDLE 延迟显示（秒）
-NOTIFICATION_MIN_DURATION_SECONDS = 3.0  # 短任务通知抑制阈值（秒）
 AUTO_DISMISS_DWELL_SECONDS = 60.0  # DONE/FAILED 自动消失时间（秒），即使 focused
 RECENTLY_FINISHED_HINT_SECONDS = 10.0  # "recently finished" 提示持续时间（秒）
 QUIET_COMPLETION_THRESHOLD_SECONDS = 3.0  # 静默完成阈值（秒），短于此不闪烁

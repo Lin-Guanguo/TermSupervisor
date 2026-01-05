@@ -473,34 +473,12 @@ class TestDisplayUpdate:
         update = DisplayUpdate(
             pane_id="test-pane",
             display_state=display_state,
-            suppressed=False,
             reason="state_change",
         )
 
         assert update.pane_id == "test-pane"
         assert update.display_state.status == TaskStatus.RUNNING
-        assert update.suppressed is False
         assert update.reason == "state_change"
-
-    def test_display_update_suppressed(self):
-        """DisplayUpdate 带 suppressed 标记"""
-        from termsupervisor.state import DisplayState
-
-        display_state = DisplayState(
-            status=TaskStatus.DONE,
-            source="shell",
-            description="命令完成",
-            state_id=2,
-        )
-        update = DisplayUpdate(
-            pane_id="test-pane",
-            display_state=display_state,
-            suppressed=True,
-            reason="短任务，不通知",
-        )
-
-        assert update.suppressed is True
-        assert update.reason == "短任务，不通知"
 
     def test_display_update_to_dict(self):
         """DisplayUpdate to_dict 方法"""
@@ -515,13 +493,11 @@ class TestDisplayUpdate:
         update = DisplayUpdate(
             pane_id="test-pane",
             display_state=display_state,
-            suppressed=False,
             reason="command_end",
         )
 
         d = update.to_dict()
         assert d["pane_id"] == "test-pane"
-        assert d["suppressed"] is False
         assert d["reason"] == "command_end"
         # display_state 也应该被序列化
         assert "display_state" in d

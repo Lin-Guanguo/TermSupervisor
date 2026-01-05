@@ -8,7 +8,6 @@ import uvicorn
 
 from termsupervisor import config
 from termsupervisor.adapters.iterm2 import ITerm2Client
-from termsupervisor.core.ids import normalize_id
 from termsupervisor.render import RenderPipeline
 from termsupervisor.runtime import RuntimeComponents, bootstrap
 from termsupervisor.state import TaskStatus
@@ -30,28 +29,12 @@ async def setup_hook_system(server: WebServer, connection: iterm2.Connection) ->
     Returns:
         RuntimeComponents 包含所有组件
     """
-    # 创建 focus 检查函数（需要先有 iterm_source 来获取 focus）
-    # 由于 bootstrap 需要 focus_checker，而 focus_checker 需要 iterm_source
-    # 所以先创建组件，再设置 focus_checker
     components = bootstrap(connection)
 
-    # 设置 focus 检查函数（用于通知抑制判断）
-    def check_is_focused(pane_id: str) -> bool:
-        focus_session = components.iterm_source.current_focus_session
-        if not focus_session:
-            return False
-        normalized_pane = normalize_id(pane_id)
-        normalized_focus = normalize_id(focus_session)
-        return normalized_pane == normalized_focus
-
-    components.hook_manager.set_focus_checker(check_is_focused)
-
     # 设置状态变更回调 -> 广播到前端
-    async def on_status_change(pane_id: str, status, reason: str, source: str, suppressed: bool):
+    async def on_status_change(pane_id: str, status, reason: str, source: str):
         """状态变更时广播到前端"""
         window_name, tab_name, pane_name = server.pipeline.get_pane_location(pane_id)
-
-        needs_notification = status.needs_notification and not suppressed
 
         await server.broadcast(
             {
@@ -61,7 +44,7 @@ async def setup_hook_system(server: WebServer, connection: iterm2.Connection) ->
                 "status_color": status.color,
                 "reason": reason,
                 "source": source,
-                "needs_notification": needs_notification,
+                "needs_notification": status.needs_notification,
                 "needs_attention": status.needs_attention,
                 "is_running": status.is_running,
                 "display": status.display,

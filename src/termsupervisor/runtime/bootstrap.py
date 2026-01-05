@@ -3,7 +3,6 @@
 职责：
 - 创建 Timer, HookManager, 各 Source, Receiver
 - 注册 LONG_RUNNING tick 回调
-- 绑定 focus_checker
 - 返回 RuntimeComponents 供调用方使用
 
 不负责：
@@ -11,7 +10,6 @@
 - Supervisor/WebServer 创建（独立于 hook 系统）
 """
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -59,15 +57,11 @@ class RuntimeComponents:
         logger.info("[Bootstrap] All sources stopped")
 
 
-def bootstrap(
-    connection: "iterm2.Connection",
-    focus_checker: Callable[[str], bool] | None = None,
-) -> RuntimeComponents:
+def bootstrap(connection: "iterm2.Connection") -> RuntimeComponents:
     """构造运行时组件
 
     Args:
         connection: iTerm2 连接
-        focus_checker: 判断 pane 是否 focused 的函数（用于通知抑制）
 
     Returns:
         RuntimeComponents 包含所有构造好的组件
@@ -96,16 +90,12 @@ def bootstrap(
         hook_manager.tick_all,
     )
 
-    # 4. 设置 focus_checker（如果提供）
-    if focus_checker:
-        hook_manager.set_focus_checker(focus_checker)
-
-    # 5. 创建 Sources
+    # 4. 创建 Sources
     shell_source = ShellHookSource(hook_manager, connection)
     claude_code_source = ClaudeCodeHookSource(hook_manager)
     iterm_source = ItermHookSource(hook_manager, connection)
 
-    # 6. 创建 Receiver 并注册适配器
+    # 5. 创建 Receiver 并注册适配器
     receiver = HookReceiver(hook_manager)
     receiver.register_adapter(claude_code_source)
 
