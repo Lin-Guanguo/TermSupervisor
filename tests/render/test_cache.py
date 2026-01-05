@@ -21,7 +21,6 @@ class TestLayoutCache:
         cache = LayoutCache()
         assert isinstance(cache.layout, LayoutData)
         assert cache.layout.windows == []
-        assert cache.snapshots == {}
         assert cache.pane_states == {}
 
     def test_update_layout(self):

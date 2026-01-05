@@ -6,7 +6,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from termsupervisor.adapters.iterm2.models import LayoutData, PaneSnapshot
+from termsupervisor.adapters.iterm2.models import LayoutData
 
 if TYPE_CHECKING:
     from termsupervisor.adapters.iterm2.client import JobMetadata
@@ -19,13 +19,11 @@ class LayoutCache:
 
     维护：
     - 当前布局 (layout)
-    - Pane 内容快照 (snapshots)
     - Pane 状态 (pane_states)
     """
 
     def __init__(self):
         self.layout: LayoutData = LayoutData()
-        self.snapshots: dict[str, PaneSnapshot] = {}
         self.pane_states: dict[str, PaneState] = {}
 
     def update_layout(self, layout: LayoutData) -> None:
@@ -77,17 +75,12 @@ class LayoutCache:
             state.last_render = state.current
             state.last_render_at = datetime.now()
 
-    def get_snapshot(self, pane_id: str) -> PaneSnapshot | None:
-        """获取 pane 内容快照"""
-        return self.snapshots.get(pane_id)
-
     def get_pane_state(self, pane_id: str) -> PaneState | None:
         """获取 pane 状态"""
         return self.pane_states.get(pane_id)
 
     def remove_pane(self, pane_id: str) -> None:
         """移除 pane 相关数据"""
-        self.snapshots.pop(pane_id, None)
         self.pane_states.pop(pane_id, None)
 
     def get_current_pane_ids(self) -> set[str]:
@@ -102,8 +95,7 @@ class LayoutCache:
     def cleanup_closed_panes(self) -> list[str]:
         """清理已关闭的 pane，返回被清理的 pane ID 列表"""
         current_ids = self.get_current_pane_ids()
-        # Check both snapshots and pane_states for closed panes
-        cached_ids = set(self.snapshots.keys()) | set(self.pane_states.keys())
+        cached_ids = set(self.pane_states.keys())
         closed_ids = cached_ids - current_ids
 
         for pane_id in closed_ids:
