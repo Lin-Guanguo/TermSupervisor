@@ -72,10 +72,7 @@ def bootstrap(connection: "iterm2.Connection") -> RuntimeComponents:
     global _current_components
 
     if _current_components is not None:
-        raise RuntimeError(
-            "bootstrap() has already been called. "
-            "Use get_current_components() to access existing components."
-        )
+        raise RuntimeError("bootstrap() has already been called.")
 
     # 1. 创建 Timer
     timer = Timer()
@@ -111,39 +108,3 @@ def bootstrap(connection: "iterm2.Connection") -> RuntimeComponents:
     )
 
     return _current_components
-
-
-def get_current_components() -> "RuntimeComponents | None":
-    """获取当前运行的 RuntimeComponents
-
-    如果 bootstrap() 还没调用，返回 None。
-    """
-    return _current_components
-
-
-def get_current_hook_manager() -> "HookManager | None":
-    """获取当前运行的 HookManager
-
-    如果 bootstrap() 还没调用，返回 None。
-    用于 deprecated shims 检查是否已有实例。
-    """
-    if _current_components is not None:
-        return _current_components.hook_manager
-    return None
-
-
-def get_current_timer() -> "Timer | None":
-    """获取当前运行的 Timer
-
-    如果 bootstrap() 还没调用，返回 None。
-    用于 deprecated shims 检查是否已有实例。
-    """
-    if _current_components is not None:
-        return _current_components.timer
-    return None
-
-
-def _reset_for_testing() -> None:
-    """重置 bootstrap 状态（仅用于测试）"""
-    global _current_components
-    _current_components = None

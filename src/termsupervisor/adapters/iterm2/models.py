@@ -3,9 +3,7 @@
 布局相关的 DTO：Window, Tab, Pane, Layout。
 """
 
-from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
 
 
 @dataclass
@@ -54,17 +52,3 @@ class LayoutData:
     def to_dict(self) -> dict:
         """转换为字典"""
         return asdict(self)
-
-
-@dataclass
-class PaneSnapshot:
-    """Pane 内容快照"""
-
-    pane_id: str  # renamed from session_id
-    index: int
-    content: str
-    updated_at: datetime = field(default_factory=datetime.now)
-
-
-# 更新回调类型
-UpdateCallback = Callable[[LayoutData], Awaitable[None]]

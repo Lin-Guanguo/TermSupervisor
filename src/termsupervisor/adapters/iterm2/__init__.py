@@ -6,9 +6,7 @@ from termsupervisor.adapters.iterm2.layout import get_layout
 from termsupervisor.adapters.iterm2.models import (
     LayoutData,
     PaneInfo,
-    PaneSnapshot,
     TabInfo,
-    UpdateCallback,
     WindowInfo,
 )
 from termsupervisor.adapters.iterm2.naming import (
@@ -35,8 +33,6 @@ __all__ = [
     "TabInfo",
     "WindowInfo",
     "LayoutData",
-    "PaneSnapshot",
-    "UpdateCallback",
     # Naming
     "get_name",
     "get_session_name",

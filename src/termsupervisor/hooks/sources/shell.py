@@ -78,9 +78,6 @@ class ShellHookSource(HookSource):
         self._prompt_monitor = PromptMonitorManager(connection)
         self._prompt_monitor.set_command_callback(self._on_command_event)
 
-        # 跟踪每个 session 的当前命令
-        self._current_commands: dict[str, str] = {}  # session_id -> command
-
     async def start(self) -> None:
         """启动 Shell Hook 监听"""
         await self._prompt_monitor.start()
@@ -111,7 +108,6 @@ class ShellHookSource(HookSource):
             # 命令开始 - 清洗命令后发送
             raw_command = str(info) if info else ""
             sanitized = sanitize_command(raw_command)
-            self._current_commands[session_id] = raw_command  # 保留原始命令供内部使用
 
             # 使用 emit_event 发送，Manager 负责日志/指标
             await self.manager.emit_event(
@@ -124,7 +120,6 @@ class ShellHookSource(HookSource):
         elif event_type == "command_end":
             # 命令结束
             exit_code = int(info) if info else 0
-            self._current_commands.pop(session_id, "")
 
             await self.manager.emit_event(
                 source="shell",

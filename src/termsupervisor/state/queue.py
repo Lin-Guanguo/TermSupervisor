@@ -360,50 +360,6 @@ class EventQueue(ActorQueue[HookEvent]):
 
         return False
 
-    def merge_content_events(self) -> int:
-        """合并队列中的连续 content 事件（可选优化）
-
-        保留最新的 content.changed/update 事件，丢弃旧的。
-
-        Returns:
-            合并的事件数
-        """
-        if len(self._queue) < 2:
-            return 0
-
-        merged = 0
-        new_queue: deque[HookEvent] = deque(maxlen=self._max_size)
-        last_content_event: HookEvent | None = None
-
-        for event in self._queue:
-            if event.signal in LOW_PRIORITY_SIGNALS:
-                # 只保留最新的 content 事件
-                if last_content_event is not None:
-                    merged += 1
-                last_content_event = event
-            else:
-                # 非 content 事件：先入队之前的 content，再入队当前
-                if last_content_event is not None:
-                    new_queue.append(last_content_event)
-                    last_content_event = None
-                new_queue.append(event)
-
-        # 入队最后一个 content 事件
-        if last_content_event is not None:
-            new_queue.append(last_content_event)
-
-        self._queue = new_queue
-
-        if merged > 0:
-            if METRICS_ENABLED:
-                pane_short = self.pane_id[:8]
-                metrics.inc("queue.content_merged", {"pane": pane_short}, merged)
-                logger.debug(f"[Queue:{pane_short}] Merged {merged} content events")
-            # 发送调试事件
-            self._emit_debug_event("content.update", f"merge_content_{merged}_events")
-
-        return merged
-
     def debug_snapshot(self, max_pending: int = 10) -> dict:
         """获取调试快照"""
         pending_events = list(self._queue)[:max_pending]

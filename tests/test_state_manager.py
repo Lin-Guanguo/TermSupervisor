@@ -403,59 +403,6 @@ class TestQueuePriority:
         assert result is True
         assert queue.low_priority_drops == 0
 
-    def test_merge_content_events(self, manager):
-        """合并连续 content 事件"""
-        from termsupervisor.state.queue import EventQueue
-
-        queue = EventQueue("test-pane", max_size=10)
-
-        # 入队多个 content 事件（中间夹杂其他事件）
-        queue.enqueue_event(
-            HookEvent(
-                source="content",
-                pane_id="test-pane",
-                event_type="changed",
-                data={"content": "content1"},
-                pane_generation=1,
-            )
-        )
-        queue.enqueue_event(
-            HookEvent(
-                source="content",
-                pane_id="test-pane",
-                event_type="changed",
-                data={"content": "content2"},
-                pane_generation=1,
-            )
-        )
-        queue.enqueue_event(
-            HookEvent(
-                source="shell",
-                pane_id="test-pane",
-                event_type="command_start",
-                data={"command": "ls"},
-                pane_generation=1,
-            )
-        )
-        queue.enqueue_event(
-            HookEvent(
-                source="content",
-                pane_id="test-pane",
-                event_type="changed",
-                data={"content": "content3"},
-                pane_generation=1,
-            )
-        )
-
-        assert len(queue) == 4
-
-        # 合并
-        merged = queue.merge_content_events()
-
-        # 应该合并了 content1（保留 content2 因为它在 command_start 之前）
-        assert merged == 1
-        assert len(queue) == 3
-
 
 class TestDisplayUpdate:
     """DisplayUpdate 数据类测试"""
