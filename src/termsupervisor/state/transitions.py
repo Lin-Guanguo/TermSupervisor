@@ -239,22 +239,3 @@ def find_matching_rules(
             continue
         result.append(rule)
     return result
-
-
-def find_matching_rule(
-    signal: str,
-    current_status: TaskStatus,
-    current_source: str,
-) -> TransitionRule | None:
-    """查找第一个匹配的规则（不检查谓词）
-
-    Args:
-        signal: 事件信号
-        current_status: 当前状态
-        current_source: 当前来源
-
-    Returns:
-        第一个匹配的规则，或 None
-    """
-    rules = find_matching_rules(signal, current_status, current_source)
-    return rules[0] if rules else None

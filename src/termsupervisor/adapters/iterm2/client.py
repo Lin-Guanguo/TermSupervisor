@@ -212,19 +212,6 @@ class ITerm2Client:
         except Exception as e:
             return f"[Error: {e}]"
 
-    async def get_session_job_name(self, session: iterm2.Session) -> str:
-        """获取 session 当前前台进程名 (用于 heuristic whitelist)
-
-        Returns:
-            前台进程名 (e.g. "gemini", "python", "node")，失败时返回空字符串
-        """
-        try:
-            job_name = await session.async_get_variable("jobName")
-            return job_name or ""
-        except Exception as e:
-            logger.debug(f"Failed to get job name: {e}")
-            return ""
-
     async def get_session_job_metadata(self, session: iterm2.Session) -> JobMetadata:
         """Fetch foreground job metadata via asyncio.gather
 

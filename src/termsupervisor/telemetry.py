@@ -8,9 +8,6 @@
 
 import logging
 
-# 全局日志配置
-_LOG_FORMAT = "[%(name)s] %(message)s"
-
 
 def get_logger(name: str) -> logging.Logger:
     """获取带模块前缀的 logger
@@ -23,21 +20,6 @@ def get_logger(name: str) -> logging.Logger:
     """
     logger = logging.getLogger(name)
     return logger
-
-
-def format_pane_log(module: str, pane_id: str, msg: str) -> str:
-    """格式化带 pane_id 的日志消息
-
-    Args:
-        module: 模块名
-        pane_id: pane 标识
-        msg: 日志消息
-
-    Returns:
-        格式化的消息: [module:pane_id[:8]] msg
-    """
-    pane_short = pane_id[:8] if pane_id else "unknown"
-    return f"[{module}:{pane_short}] {msg}"
 
 
 class Metrics:
