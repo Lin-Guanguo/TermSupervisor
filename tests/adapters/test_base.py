@@ -3,7 +3,8 @@
 import pytest
 from abc import ABC
 
-from termsupervisor.adapters.base import TerminalAdapter, LayoutData, PaneInfo, TabInfo, WindowInfo
+from termsupervisor.adapters.base import TerminalAdapter
+from termsupervisor.adapters.iterm2.models import LayoutData, PaneInfo, TabInfo, WindowInfo
 
 
 class TestLayoutDataClasses:

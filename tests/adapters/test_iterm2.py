@@ -3,7 +3,8 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from termsupervisor.adapters.base import LayoutData, TerminalAdapter
+from termsupervisor.adapters.base import TerminalAdapter
+from termsupervisor.adapters.iterm2.models import LayoutData
 from termsupervisor.adapters.iterm2.adapter import ITerm2Adapter
 
 

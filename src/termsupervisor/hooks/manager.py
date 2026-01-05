@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 from ..config import METRICS_ENABLED
 from ..state import DisplayState, DisplayUpdate, HookEvent, StateManager, TaskStatus
 from ..telemetry import get_logger, metrics
+from .sources.claude_code import normalize_claude_event_type
 
 if TYPE_CHECKING:
     from ..timer import Timer
@@ -249,30 +250,14 @@ class HookManager:
 
         Note: 此方法为兼容层，内部委托给 emit_event。
         """
-        # 规范化事件类型
-        normalized_type = self._normalize_claude_event_type(event_type)
+        # 规范化事件类型（使用 claude_code.py 的公共函数）
+        normalized_type = normalize_claude_event_type(event_type)
         return await self.emit_event(
             source="claude-code",
             pane_id=pane_id,
             event_type=normalized_type,
             data=data,
         )
-
-    def _normalize_claude_event_type(self, event_type: str) -> str:
-        """规范化 Claude 事件类型"""
-        event_map = {
-            "stop": "Stop",
-            "pre_tool": "PreToolUse",
-            "pre_tool_use": "PreToolUse",
-            "post_tool": "PostToolUse",
-            "post_tool_use": "PostToolUse",
-            "session_start": "SessionStart",
-            "session_end": "SessionEnd",
-            "permission_prompt": "Notification:permission_prompt",
-            "idle_prompt": "Notification:idle_prompt",
-            "subagent_stop": "SubagentStop",
-        }
-        return event_map.get(event_type.lower(), event_type)
 
     # === 用户事件 ===
 

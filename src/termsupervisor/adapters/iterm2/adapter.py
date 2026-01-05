@@ -5,8 +5,9 @@
 
 from typing import TYPE_CHECKING
 
-from ..base import LayoutData, PaneInfo, TabInfo, TerminalAdapter, WindowInfo
+from ..base import TerminalAdapter
 from .client import ITerm2Client
+from .models import LayoutData, PaneInfo, TabInfo, WindowInfo
 from .layout import get_layout as iterm_get_layout
 
 if TYPE_CHECKING:
