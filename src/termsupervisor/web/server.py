@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from termsupervisor.adapters.iterm2 import ITerm2Client
-from termsupervisor.render import TerminalRenderer, RenderPipeline
+from termsupervisor.render import RenderPipeline, TerminalRenderer
 from termsupervisor.render.types import LayoutUpdate
 from termsupervisor.web.handlers import MessageHandler
 

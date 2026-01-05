@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING
 
 from ..base import TerminalAdapter
 from .client import ITerm2Client
-from .models import LayoutData, PaneInfo, TabInfo, WindowInfo
 from .layout import get_layout as iterm_get_layout
+from .models import LayoutData, PaneInfo, TabInfo, WindowInfo
 
 if TYPE_CHECKING:
     import iterm2
@@ -37,7 +37,7 @@ class ITerm2Adapter(TerminalAdapter):
         """
         self._connection = connection
         self._client = ITerm2Client(connection)
-        self._app: "iterm2.App | None" = None
+        self._app: iterm2.App | None = None
 
     @property
     def name(self) -> str:
