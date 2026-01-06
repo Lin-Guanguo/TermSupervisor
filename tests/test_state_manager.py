@@ -107,37 +107,6 @@ class TestEventProcessing:
         result = manager.enqueue(event)
         assert result is False
 
-    async def test_content_update_updates_content(self, manager):
-        """content.update 更新内容存储"""
-        event = HookEvent(
-            source="content",
-            pane_id="test-pane",
-            event_type="update",
-            data={"content": "new content", "content_hash": "hash123"},
-        )
-
-        manager.enqueue(event)
-        await manager.process_queued()
-
-        # Phase 3.4: 使用新的 get_content/get_content_hash 方法
-        assert manager.get_content("test-pane") == "new content"
-        assert manager.get_content_hash("test-pane") == "hash123"
-
-    async def test_content_changed_updates_content_compat(self, manager):
-        """content.changed（兼容）更新内容存储"""
-        event = HookEvent(
-            source="content",
-            pane_id="test-pane",
-            event_type="changed",
-            data={"content": "new content", "content_hash": "hash123"},
-        )
-
-        manager.enqueue(event)
-        await manager.process_queued()
-
-        # Phase 3.4: 使用新的 get_content/get_content_hash 方法
-        assert manager.get_content("test-pane") == "new content"
-        assert manager.get_content_hash("test-pane") == "hash123"
 
 class TestCallbacks:
     """回调测试 (Phase 3.3: 改用返回值)"""
@@ -260,40 +229,8 @@ class TestQueueBehavior:
         assert count == 5
 
 
-class TestQueuePriority:
-    """队列优先级测试（Phase 1）"""
-
-    def test_low_priority_dropped_at_high_watermark(self, manager):
-        """低优先级事件在高水位时被丢弃"""
-        from termsupervisor.state.queue import EventQueue
-
-        queue = EventQueue("test-pane", max_size=10)
-
-        # 填充到高水位以上（80% = 8个）
-        for i in range(9):
-            queue.enqueue_event(
-                HookEvent(
-                    source="shell",
-                    pane_id="test-pane",
-                    event_type="command_start",
-                    data={"command": f"cmd{i}"},
-                    pane_generation=1,
-                )
-            )
-
-        # 低优先级事件应该被丢弃
-        result = queue.enqueue_event(
-            HookEvent(
-                source="content",
-                pane_id="test-pane",
-                event_type="changed",
-                data={"content": "test"},
-                pane_generation=1,
-            )
-        )
-
-        assert result is False
-        assert queue.low_priority_drops == 1
+class TestQueueOverflow:
+    """队列溢出测试"""
 
     def test_protected_signal_never_dropped(self, manager):
         """受保护信号永不丢弃"""
@@ -325,38 +262,6 @@ class TestQueuePriority:
         )
 
         assert result is True
-
-    def test_low_priority_allowed_below_watermark(self, manager):
-        """低优先级事件在水位以下允许入队"""
-        from termsupervisor.state.queue import EventQueue
-
-        queue = EventQueue("test-pane", max_size=10)
-
-        # 只填充少量（低于水位）
-        for i in range(5):
-            queue.enqueue_event(
-                HookEvent(
-                    source="shell",
-                    pane_id="test-pane",
-                    event_type="command_start",
-                    data={"command": f"cmd{i}"},
-                    pane_generation=1,
-                )
-            )
-
-        # 低优先级事件应该成功入队
-        result = queue.enqueue_event(
-            HookEvent(
-                source="content",
-                pane_id="test-pane",
-                event_type="changed",
-                data={"content": "test"},
-                pane_generation=1,
-            )
-        )
-
-        assert result is True
-        assert queue.low_priority_drops == 0
 
 
 class TestDisplayUpdate:

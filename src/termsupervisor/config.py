@@ -20,8 +20,6 @@ USER_NAME_VAR = "user.name"  # 用户自定义名称变量名
 # === Actor 队列配置 ===
 QUEUE_MAX_SIZE = 256  # 队列最大长度
 QUEUE_HIGH_WATERMARK = 0.75  # 高水位阈值（打印 debug 日志）
-QUEUE_LOW_PRIORITY_DROP_WATERMARK = 0.80  # 低优先级事件丢弃水位
-LOW_PRIORITY_SIGNALS = {"content.changed", "content.update"}  # 低优先级信号
 PROTECTED_SIGNALS = {
     "shell.command_end",
     "claude-code.Stop",

@@ -44,8 +44,6 @@ class StateManager:
 
         # 显示状态存储
         self._display_states: dict[str, DisplayState] = {}
-        self._content: dict[str, str] = {}
-        self._content_hash: dict[str, str] = {}
 
         # 回调
         self._on_display_change: OnDisplayChangeCallback | None = None
@@ -109,8 +107,6 @@ class StateManager:
             description="",
             state_id=0,
         )
-        self._content[pane_id] = ""
-        self._content_hash[pane_id] = ""
 
         # 创建队列
         queue = EventQueue(pane_id)
@@ -246,24 +242,12 @@ class StateManager:
             event: Hook 事件
 
         Returns:
-            DisplayUpdate 如果发生状态变化，None 如果无变化或是 content 事件
+            DisplayUpdate 如果发生状态变化，None 如果无变化
         """
         machine = self._machines.get(pane_id)
         if not machine:
             return None
 
-        # content.changed / content.update: 仅更新内容，不触发状态转换
-        # 这是 Render Pipeline 的一部分，与 Event System 独立
-        if event.signal in ("content.changed", "content.update"):
-            content = event.data.get("content", "")
-            content_hash = event.data.get("content_hash", "")
-            self._content[pane_id] = content
-            self._content_hash[pane_id] = content_hash
-            if pane_id in self._display_states:
-                self._display_states[pane_id].content_hash = content_hash
-            return None
-
-        # 其他事件转发给状态机（Event System）
         change = machine.process(event)
 
         if change:
@@ -314,7 +298,6 @@ class StateManager:
             state_id=change.state_id,
             started_at=change.started_at,
             running_duration=change.running_duration,
-            content_hash=self._content_hash.get(pane_id, ""),
             recently_finished=False,
             quiet_completion=quiet_completion,
         )
@@ -341,14 +324,6 @@ class StateManager:
     def get_machine(self, pane_id: str) -> PaneStateMachine | None:
         """获取状态机"""
         return self._machines.get(normalize_id(pane_id))
-
-    def get_content(self, pane_id: str) -> str:
-        """获取 pane 内容"""
-        return self._content.get(normalize_id(pane_id), "")
-
-    def get_content_hash(self, pane_id: str) -> str:
-        """获取 pane 内容 hash"""
-        return self._content_hash.get(normalize_id(pane_id), "")
 
     def get_display_state(self, pane_id: str) -> DisplayState | None:
         """获取显示状态"""
@@ -418,7 +393,6 @@ class StateManager:
             "display": display_state.to_dict(),
             "queue": queue.debug_snapshot(max_pending=max_pending_events),
             "history": [entry.to_dict() for entry in history_entries],
-            "content_hash": self._content_hash.get(pane_id, ""),
         }
 
     def get_all_debug_snapshots(
@@ -496,8 +470,6 @@ class StateManager:
         self._queues.pop(pane_id, None)
         self._pane_generations.pop(pane_id, None)
         self._display_states.pop(pane_id, None)
-        self._content.pop(pane_id, None)
-        self._content_hash.pop(pane_id, None)
 
         logger.debug(f"[StateManager] Removed pane: {pane_id[:8]}")
 

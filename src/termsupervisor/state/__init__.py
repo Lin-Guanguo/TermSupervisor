@@ -12,10 +12,6 @@ from .manager import StateManager
 from .predicates import (
     require_exit_code,
     require_exit_code_nonzero,
-    require_same_generation,
-    require_source_match,
-    require_state_id_at_least,
-    require_status_in,
 )
 from .queue import ActorQueue, EventQueue
 from .state_machine import PaneStateMachine
@@ -43,10 +39,6 @@ __all__ = [
     # Predicates
     "require_exit_code",
     "require_exit_code_nonzero",
-    "require_same_generation",
-    "require_status_in",
-    "require_state_id_at_least",
-    "require_source_match",
     # State Machine
     "PaneStateMachine",
     # Queue

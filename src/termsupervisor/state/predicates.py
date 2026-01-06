@@ -5,16 +5,10 @@
 
 可用谓词：
 - require_exit_code(code): 检查 exit_code 是否匹配
-- require_same_generation(): 检查 generation 是否一致
-- require_status_in(statuses): 检查状态是否在集合中
-- require_state_id_at_least(n): 检查 state_id 是否足够大
-- require_source_match(): 检查事件源与当前状态源是否一致
+- require_exit_code_nonzero(): 检查 exit_code 是否非零
 """
 
-from .types import HookEvent, Predicate, StateSnapshot, TaskStatus
-
-# TaskStatus used in require_status_in
-_ = TaskStatus
+from .types import HookEvent, Predicate, StateSnapshot
 
 
 def require_exit_code(code: int) -> Predicate:
@@ -45,87 +39,3 @@ def require_exit_code_nonzero() -> Predicate:
         return exit_code is not None and exit_code != 0
 
     return predicate
-
-
-def require_same_generation() -> Predicate:
-    """创建检查 generation 一致的谓词
-
-    用于拒绝旧的内容/事件。
-
-    Returns:
-        谓词函数
-    """
-
-    def predicate(event: HookEvent, snapshot: StateSnapshot) -> bool:
-        return event.pane_generation >= snapshot.pane_generation
-
-    return predicate
-
-
-def require_status_in(statuses: set[TaskStatus]) -> Predicate:
-    """创建检查状态是否在集合中的谓词
-
-    Args:
-        statuses: 允许的状态集合
-
-    Returns:
-        谓词函数
-    """
-
-    def predicate(event: HookEvent, snapshot: StateSnapshot) -> bool:
-        return snapshot.status in statuses
-
-    return predicate
-
-
-def require_state_id_at_least(n: int) -> Predicate:
-    """创建检查 state_id 的谓词
-
-    用于防止旧事件覆盖新状态。
-
-    Args:
-        n: 最小 state_id
-
-    Returns:
-        谓词函数
-    """
-
-    def predicate(event: HookEvent, snapshot: StateSnapshot) -> bool:
-        return snapshot.state_id >= n
-
-    return predicate
-
-
-def require_source_match() -> Predicate:
-    """创建检查事件源与状态源一致的谓词
-
-    用于实现源隔离：同源事件只能收敛本源状态。
-
-    Returns:
-        谓词函数
-    """
-
-    def predicate(event: HookEvent, snapshot: StateSnapshot) -> bool:
-        return event.source == snapshot.source
-
-    return predicate
-
-
-def always_true() -> Predicate:
-    """总是返回 True 的谓词（用于测试）"""
-
-    def predicate(event: HookEvent, snapshot: StateSnapshot) -> bool:
-        return True
-
-    return predicate
-
-
-def always_false() -> Predicate:
-    """总是返回 False 的谓词（用于测试）"""
-
-    def predicate(event: HookEvent, snapshot: StateSnapshot) -> bool:
-        return False
-
-    return predicate
-
-

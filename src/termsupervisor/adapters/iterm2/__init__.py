@@ -1,6 +1,5 @@
 """iTerm2 交互模块"""
 
-from termsupervisor.adapters.iterm2.adapter import ITerm2Adapter
 from termsupervisor.adapters.iterm2.client import ITerm2Client
 from termsupervisor.adapters.iterm2.layout import get_layout
 from termsupervisor.adapters.iterm2.models import (
@@ -25,7 +24,6 @@ from termsupervisor.core.ids import id_match as session_id_match
 from termsupervisor.core.ids import normalize_id as normalize_session_id
 
 __all__ = [
-    "ITerm2Adapter",
     "ITerm2Client",
     "get_layout",
     # Layout models

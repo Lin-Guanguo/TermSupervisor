@@ -119,33 +119,6 @@ class TestUserEvents:
         assert manager.get_status("test-pane") == TaskStatus.IDLE
 
 
-class TestContentEvents:
-    """内容事件测试"""
-
-    async def test_content_update_updates_pane(self, manager):
-        """content.update 更新 Pane 内容"""
-        await manager.process_content_update(
-            "test-pane",
-            content="new content",
-            content_hash="hash123",
-        )
-
-        # 注意：content_update 本身不改变状态，只更新内容
-        # 状态应该是 IDLE
-        _ = manager.get_state("test-pane")  # verify state exists
-        assert manager.get_status("test-pane") == TaskStatus.IDLE
-
-    async def test_content_changed_compat(self, manager):
-        """content.changed 兼容方法仍可用"""
-        # 旧的 process_content_changed 方法应该仍然有效
-        await manager.process_content_changed(
-            "test-pane",
-            content="compat test",
-            content_hash="compat123",
-        )
-        assert manager.get_status("test-pane") == TaskStatus.IDLE
-
-
 class TestCallback:
     """回调测试"""
 
@@ -324,7 +297,6 @@ class TestEmitEvent:
         await manager.process_claude_code_event("pane-2", "SessionStart")
         await manager.process_user_focus("pane-3")
         await manager.process_user_click("pane-4")
-        await manager.process_content_update("pane-5", "content", "hash")  # renamed from changed
 
         # 检查指标被记录
         shell_start = metrics.get_counter(
@@ -347,17 +319,12 @@ class TestEmitEvent:
             "hooks.events_total",
             labels={"source": "frontend", "event_type": "click_pane"},
         )
-        content = metrics.get_counter(
-            "hooks.events_total",
-            labels={"source": "content", "event_type": "update"},  # renamed from changed
-        )
 
         assert shell_start >= 1
         assert shell_end >= 1
         assert claude >= 1
         assert iterm >= 1
         assert frontend >= 1
-        assert content >= 1
 
 
 class TestSanitization:

@@ -172,7 +172,7 @@ class HookManager:
         4. 入队处理
 
         Args:
-            source: 事件来源 (shell, claude-code, content, iterm, frontend)
+            source: 事件来源 (shell, claude-code, iterm, frontend)
             pane_id: pane 标识
             event_type: 事件类型
             data: 事件数据（可选）
@@ -269,37 +269,6 @@ class HookManager:
             pane_id=pane_id,
             event_type=click_type,
         )
-
-    # === 内容事件 ===
-
-    async def process_content_update(
-        self,
-        pane_id: str,
-        content: str = "",
-        content_hash: str = "",
-    ) -> bool:
-        """处理内容更新事件
-
-        Note: 此方法为兼容层，内部委托给 emit_event。
-        内容事件禁用日志（太频繁），但仍计数指标。
-        """
-        return await self.emit_event(
-            source="content",
-            pane_id=pane_id,
-            event_type="update",  # Phase 2: renamed from "changed"
-            data={"content": content, "content_hash": content_hash},
-            log=False,  # 不记录日志（太频繁）
-        )
-
-    # Compat alias for old name
-    async def process_content_changed(
-        self,
-        pane_id: str,
-        content: str = "",
-        content_hash: str = "",
-    ) -> bool:
-        """Deprecated: use process_content_update instead"""
-        return await self.process_content_update(pane_id, content, content_hash)
 
     # === 状态查询 ===
 
