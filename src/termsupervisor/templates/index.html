@@ -1600,13 +1600,9 @@
         }
 
         // 追踪 pane 更新状态
-        // { pane_id: { firstUpdate: timestamp, lastUpdate: timestamp, isLongRunning: bool } }
+        // { pane_id: { firstUpdate: timestamp, lastUpdate: timestamp } }
         let paneUpdateTracker = {};
-        const LONG_RUNNING_THRESHOLD = 15000; // 15 秒
         const UPDATE_TIMEOUT = 6000; // 6 秒无更新认为停止（2个轮询周期）
-
-        // 需要显示蓝色的 pane（长时间任务已完成）
-        let longRunningCompleted = new Set();
 
         // 隐藏的 tabs（按 window_id 分组）
         // { window_id: Set(tab_id, ...) }
@@ -1864,11 +1860,6 @@
 
             // 更新有更新的 pane
             updatedPanes.forEach(paneId => {
-                // 如果之前是蓝色状态，现在又有更新了，清除蓝色状态
-                if (longRunningCompleted.has(paneId)) {
-                    longRunningCompleted.delete(paneId);
-                }
-
                 if (!paneUpdateTracker[paneId]) {
                     paneUpdateTracker[paneId] = {
                         firstUpdate: now,
@@ -1883,15 +1874,9 @@
             Object.keys(paneUpdateTracker).forEach(paneId => {
                 const tracker = paneUpdateTracker[paneId];
                 const timeSinceLastUpdate = now - tracker.lastUpdate;
-                const totalDuration = tracker.lastUpdate - tracker.firstUpdate;
 
-                // 如果超过 UPDATE_TIMEOUT 没有更新，认为任务停止
+                // 如果超过 UPDATE_TIMEOUT 没有更新，清除追踪器
                 if (timeSinceLastUpdate > UPDATE_TIMEOUT) {
-                    // 如果持续时间超过阈值，加入蓝色列表
-                    if (totalDuration >= LONG_RUNNING_THRESHOLD) {
-                        longRunningCompleted.add(paneId);
-                    }
-                    // 清除追踪器
                     delete paneUpdateTracker[paneId];
                 }
             });
@@ -1900,11 +1885,6 @@
         // 判断 pane 是否正在持续更新（显示绿色闪烁）
         function isUpdating(paneId) {
             return paneUpdateTracker.hasOwnProperty(paneId);
-        }
-
-        // 判断 pane 是否是已完成的长时间任务（显示蓝色）
-        function isLongRunningCompleted(paneId) {
-            return longRunningCompleted.has(paneId);
         }
 
         // 是否正在 hover 下拉菜单

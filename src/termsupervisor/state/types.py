@@ -9,6 +9,7 @@
 """
 
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -324,8 +325,6 @@ class TransitionRule:
             result = self.description_template
             for key, value in data.items():
                 # 处理 {key:30} 格式
-                import re
-
                 pattern = rf"\{{{key}:(\d+)\}}"
                 match = re.search(pattern, result)
                 if match:

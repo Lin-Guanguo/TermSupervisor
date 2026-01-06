@@ -173,7 +173,7 @@ class WebServer:
     async def broadcast(self, data: dict):
         """广播消息给所有客户端"""
         disconnected = []
-        for client in self.clients:
+        for client in list(self.clients):  # Snapshot for safe iteration
             try:
                 await client.send_json(data)
             except Exception as e:

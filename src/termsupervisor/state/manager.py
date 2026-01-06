@@ -12,13 +12,10 @@ from typing import Any
 
 from ..config import QUIET_COMPLETION_THRESHOLD_SECONDS
 from ..core.ids import normalize_id, short_id
-from ..telemetry import get_logger, metrics
+from ..telemetry import get_logger
 from .queue import EventQueue
 from .state_machine import PaneStateMachine
 from .types import DisplayState, DisplayUpdate, HookEvent, StateChange, TaskStatus
-
-# Suppress unused import warning
-_ = metrics
 
 logger = get_logger(__name__)
 

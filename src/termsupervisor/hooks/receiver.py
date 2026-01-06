@@ -70,7 +70,7 @@ class HookReceiver:
                     pane_id=request.pane_id, event=request.event, data=request.data
                 )
                 return HookEventResponse(success=True, message="Event processed")
-            except Exception as e:
+            except (ValueError, KeyError, AttributeError, RuntimeError) as e:
                 logger.error(f"[HookReceiver] 处理事件失败: {e}")
                 return HookEventResponse(success=False, message=str(e))
 
