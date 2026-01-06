@@ -17,10 +17,14 @@ from .queue import ActorQueue, EventQueue
 from .state_machine import PaneStateMachine
 from .types import (
     DisplayState,
+    DisplayStateDict,
     DisplayUpdate,
     HookEvent,
+    PaneStatusDisplay,
+    PaneStatusInfo,
     StateChange,
     StateHistoryEntry,
+    StateHistoryEntryDict,
     StateSnapshot,
     TaskStatus,
     TransitionRule,
@@ -36,6 +40,11 @@ __all__ = [
     "DisplayUpdate",
     "StateSnapshot",
     "TransitionRule",
+    # TypedDicts
+    "PaneStatusInfo",
+    "PaneStatusDisplay",
+    "DisplayStateDict",
+    "StateHistoryEntryDict",
     # Predicates
     "require_exit_code",
     "require_exit_code_nonzero",

@@ -10,6 +10,7 @@ from termsupervisor import config
 from termsupervisor.adapters.iterm2 import ITerm2Client
 from termsupervisor.render import RenderPipeline
 from termsupervisor.runtime import RuntimeComponents, bootstrap
+from termsupervisor.state import PaneStatusInfo
 from termsupervisor.web.server import WebServer
 
 logger = logging.getLogger(__name__)
@@ -81,20 +82,20 @@ async def start_server(connection: iterm2.Connection):
     print("[HookSystem] Hook 系统已启动 (Shell + Claude Code + iTerm Focus)")
 
     # 设置 pipeline 的状态提供者（用于 get_layout_dict 获取状态信息）
-    def get_pane_status(pane_id: str) -> dict | None:
+    def get_pane_status(pane_id: str) -> PaneStatusInfo | None:
         """获取 pane 状态信息"""
         state = components.hook_manager.get_state(pane_id)
         if state:
             status = state.status
-            return {
-                "status": status.value,
-                "status_color": status.color,
-                "status_reason": state.description,
-                "is_running": status.is_running,
-                "needs_notification": status.needs_notification,
-                "needs_attention": status.needs_attention,
-                "display": status.display,
-            }
+            return PaneStatusInfo(
+                status=status.value,
+                status_color=status.color,
+                status_reason=state.description,
+                is_running=status.is_running,
+                needs_notification=status.needs_notification,
+                needs_attention=status.needs_attention,
+                display=status.display,
+            )
         return None
 
     pipeline.set_status_provider(get_pane_status)

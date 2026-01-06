@@ -6,6 +6,7 @@
 - DisplayState: 显示状态
 - TransitionRule: 流转规则
 - StateHistoryEntry: 历史记录条目
+- TypedDict definitions for dict structures
 """
 
 import logging
@@ -14,6 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from typing import TypedDict
 
 from ..core.ids import short_id
 
@@ -78,6 +80,65 @@ class TaskStatus(Enum):
         return self != TaskStatus.IDLE
 
 
+# TypedDict definitions for dict structures
+
+
+class PaneStatusInfo(TypedDict):
+    """Status provider return type.
+
+    Used by StatusProviderCallback in render/pipeline.py.
+    """
+
+    status: str  # TaskStatus.value
+    status_color: str  # TaskStatus.color
+    status_reason: str  # description
+    is_running: bool
+    needs_notification: bool
+    needs_attention: bool
+    display: bool
+
+
+class PaneStatusDisplay(PaneStatusInfo):
+    """Extended status info with job metadata.
+
+    Used in get_layout_dict() pane_statuses.
+    """
+
+    job_name: str
+    path: str
+
+
+class DisplayStateDict(TypedDict):
+    """DisplayState.to_dict() return type.
+
+    Used for WebSocket broadcast.
+    """
+
+    status: str
+    status_color: str
+    source: str
+    description: str
+    state_id: int
+    is_running: bool
+    needs_notification: bool
+    needs_attention: bool
+    display: bool
+    running_duration: float
+    recently_finished: bool
+    quiet_completion: bool
+
+
+class StateHistoryEntryDict(TypedDict):
+    """StateHistoryEntry.to_dict() return type."""
+
+    signal: str
+    from_status: str
+    to_status: str
+    success: bool
+    description: str
+    timestamp: float
+
+
 @dataclass
 class HookEvent:
     """Hook 事件 - 统一事件 DTO
@@ -135,16 +196,16 @@ class StateHistoryEntry:
         mark = "✓" if self.success else "✗"
         return f"{ts} | {mark} {self.signal} → {self.to_status.value}"
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> StateHistoryEntryDict:
         """转换为可序列化的字典"""
-        return {
-            "signal": self.signal,
-            "from_status": self.from_status.value,
-            "to_status": self.to_status.value,
-            "success": self.success,
-            "description": self.description,
-            "timestamp": self.timestamp,
-        }
+        return StateHistoryEntryDict(
+            signal=self.signal,
+            from_status=self.from_status.value,
+            to_status=self.to_status.value,
+            success=self.success,
+            description=self.description,
+            timestamp=self.timestamp,
+        )
 
 
 @dataclass
@@ -190,22 +251,22 @@ class DisplayState:
     recently_finished: bool = False  # 最近完成提示（auto-dismiss 后短暂显示）
     quiet_completion: bool = False  # 静默完成（短任务不闪烁）
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> DisplayStateDict:
         """转换为字典（用于 WebSocket）"""
-        return {
-            "status": self.status.value,
-            "status_color": self.status.color,
-            "source": self.source,
-            "description": self.description,
-            "state_id": self.state_id,
-            "is_running": self.status.is_running,
-            "needs_notification": self.status.needs_notification,
-            "needs_attention": self.status.needs_attention,
-            "display": self.status.display,
-            "running_duration": self.running_duration,
-            "recently_finished": self.recently_finished,
-            "quiet_completion": self.quiet_completion,
-        }
+        return DisplayStateDict(
+            status=self.status.value,
+            status_color=self.status.color,
+            source=self.source,
+            description=self.description,
+            state_id=self.state_id,
+            is_running=self.status.is_running,
+            needs_notification=self.status.needs_notification,
+            needs_attention=self.status.needs_attention,
+            display=self.status.display,
+            running_duration=self.running_duration,
+            recently_finished=self.recently_finished,
+            quiet_completion=self.quiet_completion,
+        )
 
 
 @dataclass

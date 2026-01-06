@@ -7,12 +7,12 @@ import asyncio
 import logging
 import os
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from termsupervisor import config
 from termsupervisor.analysis import ContentCleaner
 from termsupervisor.core.ids import id_match, normalize_id
-from termsupervisor.state import TaskStatus
+from termsupervisor.state import PaneStatusDisplay, PaneStatusInfo, TaskStatus
 
 from .cache import LayoutCache
 from .detector import ChangeDetector
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Type for status provider callback
-StatusProviderCallback = Callable[[str], dict[str, Any] | None]
+StatusProviderCallback = Callable[[str], PaneStatusInfo | None]
 
 # Callback type for layout updates
 LayoutUpdateCallback = Callable[[LayoutUpdate], Awaitable[None]]
@@ -326,24 +326,24 @@ class RenderPipeline:
                         status_info = self._status_provider(pane_id)
 
                     if status_info:
-                        pane_statuses[pane_id] = {
+                        pane_statuses[pane_id] = PaneStatusDisplay(
                             **status_info,
-                            "job_name": job.job_name if job else "",
-                            "path": path,
-                        }
+                            job_name=job.job_name if job else "",
+                            path=path,
+                        )
                     else:
                         # Default to IDLE status
-                        pane_statuses[pane_id] = {
-                            "status": TaskStatus.IDLE.value,
-                            "status_color": TaskStatus.IDLE.color,
-                            "status_reason": "",
-                            "is_running": False,
-                            "needs_notification": False,
-                            "needs_attention": False,
-                            "display": "",
-                            "job_name": job.job_name if job else "",
-                            "path": path,
-                        }
+                        pane_statuses[pane_id] = PaneStatusDisplay(
+                            status=TaskStatus.IDLE.value,
+                            status_color=TaskStatus.IDLE.color,
+                            status_reason="",
+                            is_running=False,
+                            needs_notification=False,
+                            needs_attention=False,
+                            display=False,
+                            job_name=job.job_name if job else "",
+                            path=path,
+                        )
 
         data["pane_statuses"] = pane_statuses
         return data
