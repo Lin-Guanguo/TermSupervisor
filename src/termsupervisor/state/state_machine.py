@@ -11,6 +11,7 @@ from collections import deque
 from datetime import datetime
 
 from ..config import STATE_HISTORY_MAX_LENGTH
+from ..core.ids import short_id
 from ..telemetry import get_logger, metrics
 from .transitions import find_matching_rules
 from .types import (
@@ -111,7 +112,7 @@ class PaneStateMachine:
             StateChange 对象（发生转换时），或 None（无转换）
         """
         signal = event.signal
-        pane_short = self.pane_id[:8]
+        pane_short = short_id(self.pane_id)
 
         # 1. 检查 generation（拒绝旧事件）
         if event.pane_generation < self._pane_generation:
@@ -181,9 +182,9 @@ class PaneStateMachine:
         new_source = rule.get_target_source(self._source)
         new_description = rule.format_description(event.data)
 
-        # 特殊处理：PreToolUse 同源时不重置 started_at
+        # 检查是否重置 started_at（支持同源保持）
         should_reset_started_at = rule.reset_started_at
-        if signal == "claude-code.PreToolUse" and old_source == "claude-code":
+        if rule.preserve_started_at_if_same_source and old_source == new_source:
             should_reset_started_at = False
 
         new_started_at: float | None

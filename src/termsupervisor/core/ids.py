@@ -39,3 +39,20 @@ def id_match(id1: str, id2: str) -> bool:
         True if the IDs refer to the same pane/session
     """
     return normalize_id(id1) == normalize_id(id2)
+
+
+def short_id(pane_id: str, length: int = 8) -> str:
+    """Get a short display version of a pane ID for logging.
+
+    Extracts the last part after ':' (if present) and truncates to length.
+
+    Args:
+        pane_id: The pane ID to shorten
+        length: Maximum length (default 8)
+
+    Returns:
+        Shortened ID for display in logs
+    """
+    # Extract UUID part if prefixed (e.g., "w0t1p1:UUID" -> "UUID")
+    pure_id = pane_id.split(":")[-1] if ":" in pane_id else pane_id
+    return pure_id[:length]

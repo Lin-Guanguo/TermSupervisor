@@ -11,7 +11,7 @@ from collections.abc import Callable
 from typing import Any
 
 from ..config import QUIET_COMPLETION_THRESHOLD_SECONDS
-from ..core.ids import normalize_id
+from ..core.ids import normalize_id, short_id
 from ..telemetry import get_logger, metrics
 from .queue import EventQueue
 from .state_machine import PaneStateMachine
@@ -64,7 +64,7 @@ class StateManager:
         Args:
             callback: 回调函数 (event_dict) -> None
                 event_dict 包含: pane_id, signal, result, reason, state_id,
-                以及队列统计: queue_depth, queue_low_priority_drops, queue_overflow_drops
+                以及队列统计: queue_depth, queue_overflow_drops
         """
         self._on_debug_event = callback
         # 同步到已有的队列
@@ -118,7 +118,7 @@ class StateManager:
         self._machines[pane_id] = machine
         self._queues[pane_id] = queue
 
-        logger.debug(f"[StateManager] Created pane: {pane_id[:8]}")
+        logger.debug(f"[StateManager] Created pane: {short_id(pane_id)}")
 
     def _notify_display_change(self, pane_id: str, state: DisplayState) -> None:
         """通知显示变化"""
@@ -150,11 +150,9 @@ class StateManager:
         # 获取队列统计
         queue = self._queues.get(pane_id)
         queue_depth = 0
-        queue_low_priority_drops = 0
         queue_overflow_drops = 0
         if queue:
             queue_depth = queue.depth
-            queue_low_priority_drops = queue.low_priority_drops
             queue_overflow_drops = queue.overflow_drops
 
         self._on_debug_event(
@@ -165,7 +163,6 @@ class StateManager:
                 "reason": reason,
                 "state_id": state_id,
                 "queue_depth": queue_depth,
-                "queue_low_priority_drops": queue_low_priority_drops,
                 "queue_overflow_drops": queue_overflow_drops,
             }
         )
@@ -452,7 +449,6 @@ class StateManager:
                     "description": machine.description,
                     "running_duration": display.get("running_duration", 0.0),
                     "queue_depth": queue_info.get("depth", 0),
-                    "queue_low_priority_drops": queue_info.get("low_priority_drops", 0),
                     "queue_overflow_drops": queue_info.get("overflow_drops", 0),
                     "latest_history": latest_history,
                 }
@@ -471,7 +467,7 @@ class StateManager:
         self._pane_generations.pop(pane_id, None)
         self._display_states.pop(pane_id, None)
 
-        logger.debug(f"[StateManager] Removed pane: {pane_id[:8]}")
+        logger.debug(f"[StateManager] Removed pane: {short_id(pane_id)}")
 
     def cleanup_closed_panes(self, active_pane_ids: set[str]) -> list[str]:
         """清理已关闭的 pane

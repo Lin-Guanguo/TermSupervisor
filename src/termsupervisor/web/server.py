@@ -110,8 +110,8 @@ class WebServer:
             Returns:
                 调试快照列表，每个包含:
                 - pane_id, status, source, state_id, description
-                - running_duration, queue_depth, queue_low_priority_drops
-                - queue_overflow_drops, latest_history
+                - running_duration, queue_depth, queue_overflow_drops
+                - latest_history
             """
             hook_manager = self._hook_receiver.hook_manager if self._hook_receiver else None
             if not hook_manager:

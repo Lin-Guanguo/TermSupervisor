@@ -116,7 +116,14 @@ class MessageHandler:
 
     async def _handle_rename(self, msg: dict) -> bool:
         """处理重命名请求"""
-        success = await self.iterm_client.rename_item(msg["type"], msg["id"], msg["name"])
+        target_type = msg.get("type")
+        target_id = msg.get("id")
+        name = msg.get("name")
+        if not all([target_type, target_id, name]):
+            logger.warning(f"[WS] Rename missing required fields: {msg}")
+            return False
+
+        success = await self.iterm_client.rename_item(target_type, target_id, name)
         if success:
             await self.pipeline.check_updates()
             await self.broadcast(self.pipeline.get_layout_dict())
@@ -124,8 +131,13 @@ class MessageHandler:
 
     async def _handle_create_tab(self, msg: dict) -> bool:
         """处理创建 Tab 请求"""
+        window_id = msg.get("window_id")
+        if not window_id:
+            logger.warning(f"[WS] Create tab missing window_id: {msg}")
+            return False
+
         layout = msg.get("layout", "single")
-        success = await self.iterm_client.create_tab(msg["window_id"], layout)
+        success = await self.iterm_client.create_tab(window_id, layout)
         if success:
             await self.pipeline.check_updates()
             await self.broadcast(self.pipeline.get_layout_dict())

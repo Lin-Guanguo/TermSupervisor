@@ -18,6 +18,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 
 from ..config import METRICS_ENABLED
+from ..core.ids import short_id
 from ..state import DisplayState, DisplayUpdate, HookEvent, StateManager, TaskStatus
 from ..telemetry import get_logger, metrics
 from .sources.claude_code import normalize_claude_event_type
@@ -345,18 +346,18 @@ class HookManager:
         print("[HookManager] All States")
         print("=" * 60)
         for pane_id, state in self.get_all_states().items():
-            print(f"  {pane_id[:8]} | {state['status']:15} | {state['source']:12}")
+            print(f"  {short_id(pane_id)} | {state['status']:15} | {state['source']:12}")
         print("=" * 60 + "\n")
 
     def print_history(self, pane_id: str) -> None:
         """打印 pane 的状态历史（调试用）"""
         machine = self._state_manager.get_machine(pane_id)
         if not machine:
-            print(f"[HookManager] No state for {pane_id[:8]}")
+            print(f"[HookManager] No state for {short_id(pane_id)}")
             return
 
         print("\n" + "=" * 60)
-        print(f"[HookManager] History for {pane_id[:8]}")
+        print(f"[HookManager] History for {short_id(pane_id)}")
         print("=" * 60)
         print(machine.get_history_log())
         print("=" * 60 + "\n")

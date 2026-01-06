@@ -2586,7 +2586,7 @@
             debugStatesList.innerHTML = states.map(s => {
                 const shortId = s.pane_id.substring(0, 8);
                 const duration = s.running_duration ? `${s.running_duration.toFixed(1)}s` : '-';
-                const drops = s.queue_low_priority_drops + s.queue_overflow_drops;
+                const drops = s.queue_overflow_drops || 0;
                 const dropsClass = drops > 0 ? 'warn' : '';
                 const selected = s.pane_id === debugSelectedPaneId ? 'selected' : '';
 

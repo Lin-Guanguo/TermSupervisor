@@ -77,7 +77,8 @@ C2_CLAUDE_PRE_TOOL_USE = TransitionRule(
     to_status=TaskStatus.RUNNING,
     to_source="claude-code",
     description_template="工具: {tool_name:30}",
-    reset_started_at=True,  # 默认重置，但同源时不重置（在 state_machine 中处理）
+    reset_started_at=True,
+    preserve_started_at_if_same_source=True,  # 同源时保持 started_at
 )
 
 C3_CLAUDE_STOP = TransitionRule(

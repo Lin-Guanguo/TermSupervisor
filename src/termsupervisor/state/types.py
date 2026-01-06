@@ -15,6 +15,8 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING
 
+from ..core.ids import short_id
+
 if TYPE_CHECKING:
     pass
 
@@ -113,7 +115,7 @@ class HookEvent:
     def format_log(self) -> str:
         """格式化为日志字符串"""
         ts = datetime.fromtimestamp(self.timestamp).strftime("%H:%M:%S.%f")[:-3]
-        pane_short = self.pane_id.split(":")[-1][:8] if ":" in self.pane_id else self.pane_id[:8]
+        pane_short = short_id(self.pane_id)
         return f"[HookEvent] {ts} | {self.source:12} | {pane_short:8} | {self.event_type}"
 
 
@@ -188,7 +190,6 @@ class DisplayState:
     state_id: int
     started_at: float | None = None
     running_duration: float = 0.0
-    content_hash: str = ""
     recently_finished: bool = False  # 最近完成提示（auto-dismiss 后短暂显示）
     quiet_completion: bool = False  # 静默完成（短任务不闪烁）
 
@@ -280,6 +281,7 @@ class TransitionRule:
     to_source: str  # "=" = keep current source
     description_template: str
     reset_started_at: bool = True
+    preserve_started_at_if_same_source: bool = False  # 同源时保持 started_at
     predicates: list[Predicate] = field(default_factory=list)
 
     def matches_signal(self, signal: str) -> bool:

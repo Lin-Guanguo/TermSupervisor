@@ -35,8 +35,6 @@ Dashboard: http://localhost:8765
 src/termsupervisor/
 ├── config.py               # Configuration constants
 ├── telemetry.py            # Logger + in-memory metrics facade
-├── timer.py                # Interval/delay scheduler (for future use)
-├── supervisor.py           # 1s polling + layout mirror (Render Pipeline)
 ├── core/
 │   └── ids.py              # ID normalization utilities
 ├── state/                  # State architecture
@@ -44,17 +42,15 @@ src/termsupervisor/
 │   ├── state_machine.py    # Transition processing + history/state_id
 │   ├── transitions.py      # Rule table
 │   ├── queue.py            # ActorQueue with generation/backpressure
-│   ├── predicates.py       # Transition predicates
+│   ├── predicates.py       # Transition predicates (exit code checks)
 │   └── types.py            # Data types (HookEvent, DisplayState, TaskStatus, etc.)
 ├── hooks/
 │   ├── manager.py          # HookManager facade (Event System entry)
 │   ├── receiver.py         # HTTP /api/hook
 │   ├── prompt_monitor.py   # iTerm2 PromptMonitor wrapper
 │   └── sources/            # Shell, Claude Code, iTerm focus debounce
-├── adapters/               # Terminal abstraction layer
-│   ├── base.py             # TerminalAdapter interface
-│   └── iterm2/             # iTerm2 implementation
-│       ├── adapter.py      # ITerm2Adapter
+├── adapters/               # Terminal data structures
+│   └── iterm2/             # iTerm2 integration
 │       ├── client.py       # iTerm2Client
 │       ├── layout.py       # Layout traversal
 │       ├── models.py       # Layout DTOs
@@ -76,10 +72,8 @@ src/termsupervisor/
 - `src/termsupervisor/hooks/manager.py`: `emit_event()` unified entry, enqueue → StateManager, user/focus/click helpers.
 - `src/termsupervisor/state/manager.py`: StateManager (per-pane ActorQueue + display layer).
 - `src/termsupervisor/state/state_machine.py`: transition processing/history/state_id; predicates in `state/predicates.py`.
-- `src/termsupervisor/timer.py`: interval + delay scheduler (async/sync), `timer.errors` metric.
-- `src/termsupervisor/supervisor.py`: layout mirror, PaneChangeQueue-based throttle (Render Pipeline).
 - `src/termsupervisor/adapters/iterm2/models.py`: Layout DTOs (LayoutData, WindowInfo, TabInfo, PaneInfo, PaneSnapshot).
-- `src/termsupervisor/adapters/base.py`: TerminalAdapter interface (for future tmux support).
+- `src/termsupervisor/adapters/iterm2/client.py`: iTerm2Client for API interactions.
 - `src/termsupervisor/analysis/change_queue.py`: Content throttle DTOs (PaneChangeQueue, ChangeRecord, PaneChange, PaneHistory).
 - `docs/state-architecture.md`: current architecture summary.
 
@@ -124,7 +118,7 @@ Signal format: `{source}.{event_type}` (e.g., `shell.command_start`, `claude-cod
                   └── Unicode whitelist (filters ANSI, spinners, punctuation)
 ```
 
-Note: Content events are UI-only (Render Pipeline), they do not trigger state transitions.
+Content changes are handled by the Render Pipeline only (independent from Event System state transitions).
 
 ## Development Conventions
 
@@ -135,9 +129,9 @@ Note: Content events are UI-only (Render Pipeline), they do not trigger state tr
 
 ## Current Status Notes
 
-- runtime/bootstrap builds the single Timer + HookManager + Sources stack; per-pane ActorQueue + generation gating are active.
-- **Event System** (HookManager → StateManager) handles state events only; **Render Pipeline** (Supervisor) handles content polling independently.
+- runtime/bootstrap builds the HookManager + Sources stack; per-pane ActorQueue + generation gating are active.
+- **Event System** (HookManager → StateManager) handles state events only; **Render Pipeline** handles content polling independently.
 - WebSocket handler is JSON-only (`activate/rename/create_tab`); status changes broadcast from HookManager.
-- `adapters/base.py` defines TerminalAdapter interface; `adapters/iterm2/` is the only implementation (tmux support planned).
+- `adapters/iterm2/` provides iTerm2 integration (client, layout, models, naming).
 - State is in-memory only; restart resets all state/history.
 - Telemetry metrics are in-memory only; no Prometheus/StatsD sink yet.

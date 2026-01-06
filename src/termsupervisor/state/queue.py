@@ -19,6 +19,7 @@ from ..config import (
     QUEUE_HIGH_WATERMARK,
     QUEUE_MAX_SIZE,
 )
+from ..core.ids import short_id
 from ..telemetry import get_logger, metrics
 from .types import HookEvent
 
@@ -62,7 +63,7 @@ class ActorQueue[T]:
         Returns:
             是否成功入队（总是 True，但可能丢弃了旧事件）
         """
-        pane_short = self.pane_id[:8]
+        pane_short = short_id(self.pane_id)
 
         # 检查是否需要丢弃
         if len(self._queue) >= self._max_size:
@@ -100,7 +101,7 @@ class ActorQueue[T]:
 
         # 更新 depth 指标
         if METRICS_ENABLED:
-            pane_short = self.pane_id[:8]
+            pane_short = short_id(self.pane_id)
             metrics.gauge("queue.depth", len(self._queue), {"pane": pane_short})
 
         return item
@@ -125,7 +126,7 @@ class ActorQueue[T]:
         self._queue.clear()
 
         if METRICS_ENABLED:
-            pane_short = self.pane_id[:8]
+            pane_short = short_id(self.pane_id)
             metrics.gauge("queue.depth", 0, {"pane": pane_short})
 
         return count
@@ -231,7 +232,7 @@ class EventQueue(ActorQueue[HookEvent]):
         Returns:
             是否入队成功（过期或被丢弃的事件返回 False）
         """
-        pane_short = self.pane_id[:8]
+        pane_short = short_id(self.pane_id)
 
         # 检查 generation
         if event.pane_generation < self._current_generation:
@@ -285,7 +286,7 @@ class EventQueue(ActorQueue[HookEvent]):
         Returns:
             被丢弃的事件，如果全是保护事件则返回 None
         """
-        pane_short = self.pane_id[:8]
+        pane_short = short_id(self.pane_id)
 
         # 找最旧的非保护事件
         for i, evt in enumerate(self._queue):
