@@ -14,12 +14,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING
 
 from ..core.ids import short_id
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
