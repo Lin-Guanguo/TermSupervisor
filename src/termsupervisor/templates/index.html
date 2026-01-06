@@ -330,7 +330,6 @@
         }
         .pane-status.status-idle { background: #6e7681; }
         .pane-status.status-running { background: #1f6feb; }
-        .pane-status.status-long_running { background: #0d419d; }
         .pane-status.status-waiting_approval { background: #d29922; }
         .pane-status.status-done { background: #238636; }
         .pane-status.status-failed { background: #da3633; }
@@ -358,15 +357,13 @@
             background: rgba(218, 54, 51, 0.15) !important;
         }
 
-        /* RUNNING/LONG_RUNNING 状态 - 旋转渐变边框 */
-        .pane.status-running,
-        .pane.status-long_running {
+        /* RUNNING 状态 - 旋转渐变边框 */
+        .pane.status-running {
             overflow: visible !important;
             border-color: transparent !important;
             background: #0d1117 !important;
         }
-        .pane.status-running::before,
-        .pane.status-long_running::before {
+        .pane.status-running::before {
             content: '';
             position: absolute;
             top: -2px;
@@ -394,8 +391,7 @@
             animation: rotatingBorder 4s linear infinite;
             z-index: -1;
         }
-        .pane.status-running::after,
-        .pane.status-long_running::after {
+        .pane.status-running::after {
             content: '';
             position: absolute;
             top: 0;
@@ -678,7 +674,6 @@
         .notification-status.status-done { background: #238636; color: #fff; }
         .notification-status.status-failed { background: #da3633; color: #fff; }
         .notification-status.status-running { background: #1f6feb; color: #fff; }
-        .notification-status.status-long_running { background: #0d419d; color: #fff; }
         .notification-title {
             font-size: 12px;
             color: #e6edf3;
@@ -954,7 +949,6 @@
         }
         .debug-state-status.idle { background: #6e7681; }
         .debug-state-status.running { background: #1f6feb; }
-        .debug-state-status.long_running { background: #0d419d; }
         .debug-state-status.waiting_approval { background: #d29922; }
         .debug-state-status.done { background: #238636; }
         .debug-state-status.failed { background: #da3633; }
@@ -1451,7 +1445,6 @@
             const statusLabels = {
                 'idle': 'IDLE',
                 'running': 'RUNNING',
-                'long_running': 'LONG RUN',
                 'waiting_approval': 'APPROVAL',
                 'done': 'DONE',
                 'failed': 'FAILED'
@@ -2210,7 +2203,6 @@
             const statusLabels = {
                 'idle': '',  // IDLE 不显示
                 'running': 'running',
-                'long_running': 'long run',
                 'waiting_approval': 'approval',
                 'done': 'done',
                 'failed': 'failed'
@@ -2299,7 +2291,7 @@
             // 清除所有状态相关的样式类
             paneEl.classList.remove(
                 'status-waiting_approval', 'status-done', 'status-failed',
-                'status-running', 'status-long_running'
+                'status-running'
             );
 
             // 根据状态添加样式类

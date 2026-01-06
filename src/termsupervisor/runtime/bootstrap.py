@@ -1,8 +1,7 @@
 """Bootstrap - 集中构造系统组件
 
 职责：
-- 创建 Timer, HookManager, 各 Source, Receiver
-- 注册 LONG_RUNNING tick 回调
+- 创建 HookManager, 各 Source, Receiver
 - 返回 RuntimeComponents 供调用方使用
 
 不负责：
@@ -13,14 +12,12 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ..config import TIMER_TICK_INTERVAL
 from ..hooks.manager import HookManager
 from ..hooks.receiver import HookReceiver
 from ..hooks.sources.claude_code import ClaudeCodeHookSource
 from ..hooks.sources.iterm import ItermHookSource
 from ..hooks.sources.shell import ShellHookSource
 from ..telemetry import get_logger
-from ..timer import Timer
 
 if TYPE_CHECKING:
     import iterm2
@@ -35,7 +32,6 @@ _current_components: "RuntimeComponents | None" = None
 class RuntimeComponents:
     """Bootstrap 返回的运行时组件集合"""
 
-    timer: Timer
     hook_manager: HookManager
     receiver: HookReceiver
     shell_source: ShellHookSource
@@ -74,32 +70,21 @@ def bootstrap(connection: "iterm2.Connection") -> RuntimeComponents:
     if _current_components is not None:
         raise RuntimeError("bootstrap() has already been called.")
 
-    # 1. 创建 Timer
-    timer = Timer()
+    # 1. 创建 HookManager
+    hook_manager = HookManager()
 
-    # 2. 创建 HookManager（注入 Timer）
-    hook_manager = HookManager(timer=timer)
-
-    # 3. 注册 LONG_RUNNING tick
-    timer.register_interval(
-        "long_running_check",
-        TIMER_TICK_INTERVAL,
-        hook_manager.tick_all,
-    )
-
-    # 4. 创建 Sources
+    # 2. 创建 Sources
     shell_source = ShellHookSource(hook_manager, connection)
     claude_code_source = ClaudeCodeHookSource(hook_manager)
     iterm_source = ItermHookSource(hook_manager, connection)
 
-    # 5. 创建 Receiver 并注册适配器
+    # 3. 创建 Receiver 并注册适配器
     receiver = HookReceiver(hook_manager)
     receiver.register_adapter(claude_code_source)
 
     logger.info("[Bootstrap] Components created")
 
     _current_components = RuntimeComponents(
-        timer=timer,
         hook_manager=hook_manager,
         receiver=receiver,
         shell_source=shell_source,

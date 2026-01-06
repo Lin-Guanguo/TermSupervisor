@@ -5,7 +5,7 @@ TermSupervisor monitors iTerm2 pane content and mirrors the layout on a real-tim
 ## Project Overview
 
 - **Core:** iTerm2 layout mirror with per-pane state pipeline; content changes filtered by ContentCleaner + PaneChangeQueue throttling.
-- **Architecture:** HookManager → StateManager (per-pane ActorQueue + display layer) → PaneStateMachine with Timer handling LONG_RUNNING + auto-dismiss; layout/SVG rendered to a vanilla HTML/JS WebSocket dashboard. Event System (state events) and Render Pipeline (content polling) are independent.
+- **Architecture:** HookManager → StateManager (per-pane ActorQueue + display layer) → PaneStateMachine; layout/SVG rendered to a vanilla HTML/JS WebSocket dashboard. Event System (state events) and Render Pipeline (content polling) are independent.
 - **Hooks/UI:** Shell PromptMonitor, Claude Code HTTP hook, iTerm FocusMonitor (0.3s debounce); frontend actions are JSON (`activate/rename/create_tab`, tabs-per-row & hidden-tab controls).
 - **Docs:** `docs/state-architecture.md`; design source `mnema/state-architecture/`; hook notes `docs/hook-manager-refactor.md`.
 
@@ -35,12 +35,12 @@ Dashboard: http://localhost:8765
 src/termsupervisor/
 ├── config.py               # Configuration constants
 ├── telemetry.py            # Logger + in-memory metrics facade
-├── timer.py                # Interval/delay scheduler (LONG_RUNNING + auto-dismiss)
+├── timer.py                # Interval/delay scheduler (for future use)
 ├── supervisor.py           # 1s polling + layout mirror (Render Pipeline)
 ├── core/
 │   └── ids.py              # ID normalization utilities
 ├── state/                  # State architecture
-│   ├── manager.py          # StateManager (ActorQueue + display + Timer tasks)
+│   ├── manager.py          # StateManager (ActorQueue + display layer)
 │   ├── state_machine.py    # Transition processing + history/state_id
 │   ├── transitions.py      # Rule table
 │   ├── queue.py            # ActorQueue with generation/backpressure
@@ -72,9 +72,9 @@ src/termsupervisor/
 
 ## Key Files
 
-- `src/termsupervisor/runtime/bootstrap.py`: centralized component construction (Timer, HookManager, Sources, Receiver).
+- `src/termsupervisor/runtime/bootstrap.py`: centralized component construction (HookManager, Sources, Receiver).
 - `src/termsupervisor/hooks/manager.py`: `emit_event()` unified entry, enqueue → StateManager, user/focus/click helpers.
-- `src/termsupervisor/state/manager.py`: StateManager (per-pane ActorQueue + display layer + Timer tasks).
+- `src/termsupervisor/state/manager.py`: StateManager (per-pane ActorQueue + display layer).
 - `src/termsupervisor/state/state_machine.py`: transition processing/history/state_id; predicates in `state/predicates.py`.
 - `src/termsupervisor/timer.py`: interval + delay scheduler (async/sync), `timer.errors` metric.
 - `src/termsupervisor/supervisor.py`: layout mirror, PaneChangeQueue-based throttle (Render Pipeline).
@@ -85,13 +85,12 @@ src/termsupervisor/
 
 ## State Machine
 
-6 states with source isolation (no SOURCE_PRIORITY; from_source rules only):
+5 states with source isolation (no SOURCE_PRIORITY; from_source rules only):
 
 | State | Trigger Events | Color | Visual |
 |-------|---------------|-------|--------|
 | IDLE | `idle_prompt`, `SessionEnd`, focus/click | - | Hidden |
 | RUNNING | `command_start`, `PreToolUse`, `SessionStart` | Blue | Rotating border |
-| LONG_RUNNING | RUNNING > 60s | Dark blue | Rotating border |
 | WAITING_APPROVAL | `Notification:permission_prompt` | Yellow | Blinking |
 | DONE | `command_end`(exit=0), `Stop` | Green | Blinking |
 | FAILED | `command_end`(exit≠0) | Red | Blinking |
@@ -101,17 +100,16 @@ Rule table excerpt (see `state/transitions.py`):
 | # | from_status | from_source | signal | to_status | to_source | 描述 | reset_started_at | 备注 |
 |---|-------------|-------------|--------|-----------|-----------|------|------------------|------|
 | S1 | * | * | shell.command_start | RUNNING | shell | 执行: {command:30} | Y | |
-| S2 | RUNNING \| LONG_RUNNING | shell | shell.command_end(exit=0) | DONE | shell | 命令完成 | N | 保留 started_at |
-| S3 | RUNNING \| LONG_RUNNING | shell | shell.command_end(exit≠0) | FAILED | shell | 失败 (exit={exit_code}) | N | |
+| S2 | RUNNING | shell | shell.command_end(exit=0) | DONE | shell | 命令完成 | N | 保留 started_at |
+| S3 | RUNNING | shell | shell.command_end(exit≠0) | FAILED | shell | 失败 (exit={exit_code}) | N | |
 | C1 | * | * | claude-code.SessionStart | RUNNING | claude-code | 会话开始 | Y | |
 | C2 | * | * | claude-code.PreToolUse | RUNNING | claude-code | 工具: {tool_name:30} | same-source: N / else: Y | |
-| C3 | RUNNING \| LONG_RUNNING | claude-code | claude-code.Stop | DONE | claude-code | 已完成回复 | N | |
+| C3 | RUNNING | claude-code | claude-code.Stop | DONE | claude-code | 已完成回复 | N | |
 | C4 | * | * | claude-code.Notification:permission_prompt | WAITING_APPROVAL | claude-code | 需要权限确认 | N | |
 | C5 | * | * | claude-code.Notification:idle_prompt | IDLE | claude-code |  | Y | |
 | C6 | * | * | claude-code.SessionEnd | IDLE | claude-code |  | Y | |
-| T1 | RUNNING | = | timer.check | LONG_RUNNING | = | 已运行 {elapsed} | N | StateManager 发出 |
 | U1 | WAITING_APPROVAL | * | iterm.focus / frontend.click_pane | IDLE | user |  | Y | 立即流转 |
-| U2 | DONE \| FAILED | * | iterm.focus / frontend.click_pane | IDLE | user |  | Y | 立即流转，显示延迟 |
+| U2 | DONE \| FAILED | * | iterm.focus / frontend.click_pane | IDLE | user |  | Y | 立即流转 |
 
 Signal format: `{source}.{event_type}` (e.g., `shell.command_start`, `claude-code.Stop`)
 

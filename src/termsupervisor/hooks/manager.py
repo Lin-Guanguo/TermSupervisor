@@ -16,15 +16,11 @@ Sources 通过 emit_event 发送事件，Manager 负责：
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import TYPE_CHECKING
 
 from ..config import METRICS_ENABLED
 from ..state import DisplayState, DisplayUpdate, HookEvent, StateManager, TaskStatus
 from ..telemetry import get_logger, metrics
 from .sources.claude_code import normalize_claude_event_type
-
-if TYPE_CHECKING:
-    from ..timer import Timer
 
 logger = get_logger(__name__)
 
@@ -41,11 +37,10 @@ DebugEventCallback = Callable[[dict], None]
 class HookManager:
     """Hook 系统门面
 
-    提供统一的事件处理入口，内部持有 Timer 和 StateManager。
+    提供统一的事件处理入口，内部持有 StateManager。
 
     使用示例:
-        timer = Timer()
-        manager = HookManager(timer=timer)
+        manager = HookManager()
 
         # 处理 shell 命令
         await manager.process_shell_command_start(pane_id, "ls -la")
@@ -55,24 +50,16 @@ class HookManager:
         await manager.process_claude_code_event(pane_id, "PreToolUse", {"tool_name": "Read"})
     """
 
-    def __init__(self, timer: "Timer | None" = None, state_manager: StateManager | None = None):
+    def __init__(self, state_manager: StateManager | None = None):
         """初始化
 
         Args:
-            timer: Timer 实例
             state_manager: StateManager 实例（可选，默认创建新的）
         """
-        self._timer = timer
-        self._state_manager = state_manager or StateManager(timer=timer)
+        self._state_manager = state_manager or StateManager()
         self._on_change: StatusChangeCallback | None = None
-        # Phase 3.3: 不再使用回调机制，改用 process_event() 返回值
 
     # === 配置 ===
-
-    def set_timer(self, timer: "Timer") -> None:
-        """设置 Timer"""
-        self._timer = timer
-        self._state_manager.set_timer(timer)
 
     def set_change_callback(self, callback: StatusChangeCallback) -> None:
         """设置状态变更回调
@@ -185,7 +172,7 @@ class HookManager:
         4. 入队处理
 
         Args:
-            source: 事件来源 (shell, claude-code, content, iterm, frontend, timer)
+            source: 事件来源 (shell, claude-code, content, iterm, frontend)
             pane_id: pane 标识
             event_type: 事件类型
             data: 事件数据（可选）
@@ -313,31 +300,6 @@ class HookManager:
     ) -> bool:
         """Deprecated: use process_content_update instead"""
         return await self.process_content_update(pane_id, content, content_hash)
-
-    # === Timer 事件 ===
-
-    async def process_timer_check(self, pane_id: str, elapsed: str) -> bool:
-        """处理定时检查事件（通常由 tick_all 内部调用）
-
-        Note: 此方法为兼容层，内部委托给 emit_event。
-        """
-        return await self.emit_event(
-            source="timer",
-            pane_id=pane_id,
-            event_type="check",
-            data={"elapsed": elapsed},
-            log=False,  # Timer 事件由 StateManager 内部触发，无需额外日志
-        )
-
-    def tick_all(self) -> list[str]:
-        """检查所有 pane 的 LONG_RUNNING
-
-        由 Timer 周期调用。
-
-        Returns:
-            触发了 LONG_RUNNING 的 pane_id 列表
-        """
-        return self._state_manager.tick_all()
 
     # === 状态查询 ===
 
@@ -471,8 +433,3 @@ class HookManager:
     def state_manager(self) -> StateManager:
         """获取 StateManager（用于高级集成）"""
         return self._state_manager
-
-    @property
-    def timer(self) -> "Timer | None":
-        """获取 Timer"""
-        return self._timer

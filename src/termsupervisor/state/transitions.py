@@ -1,33 +1,26 @@
 """状态流转规则表
 
-定义所有状态流转规则，与 state-architecture.md 保持一致。
-
 规则表：
 | # | from_status | from_source | signal | to_status | to_source | 描述 |
 |---|-------------|-------------|--------|-----------|-----------|------|
 | S1 | * | * | shell.command_start | RUNNING | shell | 执行: {command:30} |
-| S2 | RUNNING|LONG | shell | shell.command_end(exit=0) | DONE | shell |
-| S3 | RUNNING|LONG | shell | shell.command_end(exit≠0) | FAILED | shell |
+| S2 | RUNNING | shell | shell.command_end(exit=0) | DONE | shell |
+| S3 | RUNNING | shell | shell.command_end(exit≠0) | FAILED | shell |
 | C1 | * | * | claude-code.SessionStart | RUNNING | claude-code |
 | C2 | * | * | claude-code.PreToolUse | RUNNING | claude-code |
-| C3 | RUNNING|LONG | claude-code | claude-code.Stop | DONE | claude-code |
+| C3 | RUNNING | claude-code | claude-code.Stop | DONE | claude-code |
 | C4 | * | * | claude-code.Notification:permission_prompt | WAITING | claude-code |
 | C5 | * | * | claude-code.Notification:idle_prompt | IDLE | claude-code |
 | C6 | * | * | claude-code.SessionEnd | IDLE | claude-code |
-| T1 | RUNNING | = | timer.check | LONG_RUNNING | = |
 | U1 | WAITING | * | iterm.focus / frontend.click_pane | IDLE | user |
 | U2 | DONE|FAILED | * | iterm.focus / frontend.click_pane | IDLE | user |
 """
 
 from .predicates import (
-    reject_same_source_in_long_running,
     require_exit_code,
     require_exit_code_nonzero,
 )
 from .types import TaskStatus, TransitionRule
-
-# RUNNING 和 LONG_RUNNING 的组合
-RUNNING_STATES = {TaskStatus.RUNNING, TaskStatus.LONG_RUNNING}
 
 
 # === Shell 规则 ===
@@ -40,11 +33,10 @@ S1_SHELL_COMMAND_START = TransitionRule(
     to_source="shell",
     description_template="执行: {command:30}",
     reset_started_at=True,
-    predicates=[reject_same_source_in_long_running()],  # sticky LONG_RUNNING
 )
 
 S2_SHELL_COMMAND_END_SUCCESS = TransitionRule(
-    from_status=RUNNING_STATES,
+    from_status={TaskStatus.RUNNING},
     from_source="shell",  # 只处理 shell 发起的 RUNNING
     signal_pattern="shell.command_end",
     to_status=TaskStatus.DONE,
@@ -55,7 +47,7 @@ S2_SHELL_COMMAND_END_SUCCESS = TransitionRule(
 )
 
 S3_SHELL_COMMAND_END_FAILED = TransitionRule(
-    from_status=RUNNING_STATES,
+    from_status={TaskStatus.RUNNING},
     from_source="shell",
     signal_pattern="shell.command_end",
     to_status=TaskStatus.FAILED,
@@ -76,7 +68,6 @@ C1_CLAUDE_SESSION_START = TransitionRule(
     to_source="claude-code",
     description_template="会话开始",
     reset_started_at=True,
-    predicates=[reject_same_source_in_long_running()],  # sticky LONG_RUNNING
 )
 
 C2_CLAUDE_PRE_TOOL_USE = TransitionRule(
@@ -87,11 +78,10 @@ C2_CLAUDE_PRE_TOOL_USE = TransitionRule(
     to_source="claude-code",
     description_template="工具: {tool_name:30}",
     reset_started_at=True,  # 默认重置，但同源时不重置（在 state_machine 中处理）
-    predicates=[reject_same_source_in_long_running()],  # sticky LONG_RUNNING
 )
 
 C3_CLAUDE_STOP = TransitionRule(
-    from_status=RUNNING_STATES,
+    from_status={TaskStatus.RUNNING},
     from_source="claude-code",
     signal_pattern="claude-code.Stop",
     to_status=TaskStatus.DONE,
@@ -128,19 +118,6 @@ C6_CLAUDE_SESSION_END = TransitionRule(
     to_source="claude-code",
     description_template="",
     reset_started_at=True,
-)
-
-
-# === Timer 规则 ===
-
-T1_TIMER_CHECK_LONG_RUNNING = TransitionRule(
-    from_status={TaskStatus.RUNNING},
-    from_source=None,  # 任意来源（Timer 是跨源的）
-    signal_pattern="timer.check",
-    to_status=TaskStatus.LONG_RUNNING,
-    to_source="=",  # 保持原 source
-    description_template="已运行 {elapsed}",
-    reset_started_at=False,
 )
 
 
@@ -202,8 +179,6 @@ TRANSITION_RULES: list[TransitionRule] = [
     C4_CLAUDE_PERMISSION_PROMPT,
     C5_CLAUDE_IDLE_PROMPT,
     C6_CLAUDE_SESSION_END,
-    # Timer 规则
-    T1_TIMER_CHECK_LONG_RUNNING,
     # User 规则
     U1_USER_CLEAR_WAITING,
     U1_USER_CLEAR_WAITING_CLICK,

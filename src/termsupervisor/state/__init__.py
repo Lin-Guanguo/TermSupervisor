@@ -12,7 +12,6 @@ from .manager import StateManager
 from .predicates import (
     require_exit_code,
     require_exit_code_nonzero,
-    require_running_duration_gt,
     require_same_generation,
     require_source_match,
     require_state_id_at_least,
@@ -46,7 +45,6 @@ __all__ = [
     "require_exit_code_nonzero",
     "require_same_generation",
     "require_status_in",
-    "require_running_duration_gt",
     "require_state_id_at_least",
     "require_source_match",
     # State Machine

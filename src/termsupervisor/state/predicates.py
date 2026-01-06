@@ -7,12 +7,14 @@
 - require_exit_code(code): 检查 exit_code 是否匹配
 - require_same_generation(): 检查 generation 是否一致
 - require_status_in(statuses): 检查状态是否在集合中
-- require_running_duration_gt(sec): 检查运行时长是否超过阈值
 - require_state_id_at_least(n): 检查 state_id 是否足够大
 - require_source_match(): 检查事件源与当前状态源是否一致
 """
 
 from .types import HookEvent, Predicate, StateSnapshot, TaskStatus
+
+# TaskStatus used in require_status_in
+_ = TaskStatus
 
 
 def require_exit_code(code: int) -> Predicate:
@@ -76,27 +78,6 @@ def require_status_in(statuses: set[TaskStatus]) -> Predicate:
     return predicate
 
 
-def require_running_duration_gt(seconds: float) -> Predicate:
-    """创建检查运行时长的谓词
-
-    用于 LONG_RUNNING 检测。
-
-    Args:
-        seconds: 阈值（秒）
-
-    Returns:
-        谓词函数
-    """
-
-    def predicate(event: HookEvent, snapshot: StateSnapshot) -> bool:
-        if snapshot.started_at is None:
-            return False
-        duration = snapshot.now - snapshot.started_at
-        return duration > seconds
-
-    return predicate
-
-
 def require_state_id_at_least(n: int) -> Predicate:
     """创建检查 state_id 的谓词
 
@@ -148,27 +129,3 @@ def always_false() -> Predicate:
     return predicate
 
 
-def reject_same_source_in_long_running() -> Predicate:
-    """拒绝 LONG_RUNNING 状态下同源事件的谓词
-
-    用于实现 sticky LONG_RUNNING：在 LONG_RUNNING 时，同源的 RUNNING 信号被忽略，
-    除非 generation 增加（新会话开始）。
-
-    Returns:
-        谓词函数
-    """
-
-    def predicate(event: HookEvent, snapshot: StateSnapshot) -> bool:
-        # 如果不是 LONG_RUNNING，允许
-        if snapshot.status != TaskStatus.LONG_RUNNING:
-            return True
-        # 如果是跨源，允许
-        if event.source != snapshot.source:
-            return True
-        # 如果 generation 增加（新会话），允许
-        if event.pane_generation > snapshot.pane_generation:
-            return True
-        # 同源 + LONG_RUNNING + 同 generation：拒绝
-        return False
-
-    return predicate

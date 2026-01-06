@@ -3,28 +3,22 @@
 职责：
 - 创建/管理 PaneStateMachine 实例
 - 处理事件（通过 actor 队列串行化）
-- 管理显示状态（延迟显示、auto-dismiss、recently_finished）
-- 轮询 LONG_RUNNING
+- 管理显示状态
 - 清理过期 pane
 """
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from ..config import (
-    AUTO_DISMISS_DWELL_SECONDS,
-    LONG_RUNNING_THRESHOLD_SECONDS,
-    QUIET_COMPLETION_THRESHOLD_SECONDS,
-    RECENTLY_FINISHED_HINT_SECONDS,
-)
+from ..config import QUIET_COMPLETION_THRESHOLD_SECONDS
 from ..core.ids import normalize_id
 from ..telemetry import get_logger, metrics
 from .queue import EventQueue
 from .state_machine import PaneStateMachine
 from .types import DisplayState, DisplayUpdate, HookEvent, StateChange, TaskStatus
 
-if TYPE_CHECKING:
-    from ..timer import Timer
+# Suppress unused import warning
+_ = metrics
 
 logger = get_logger(__name__)
 
@@ -39,18 +33,12 @@ class StateManager:
     统一管理状态机和显示逻辑。
 
     Attributes:
-        timer: Timer 实例
         machines: 状态机字典 {pane_id: PaneStateMachine}
         queues: 事件队列字典 {pane_id: EventQueue}
     """
 
-    def __init__(self, timer: "Timer | None" = None):
-        """初始化
-
-        Args:
-            timer: Timer 实例
-        """
-        self._timer = timer
+    def __init__(self):
+        """初始化"""
         self._machines: dict[str, PaneStateMachine] = {}
         self._queues: dict[str, EventQueue] = {}
 
@@ -67,10 +55,6 @@ class StateManager:
         self._pane_generations: dict[str, int] = {}
 
     # === 配置 ===
-
-    def set_timer(self, timer: "Timer") -> None:
-        """设置 Timer"""
-        self._timer = timer
 
     def set_on_display_change(self, callback: OnDisplayChangeCallback) -> None:
         """设置显示变化回调"""
@@ -294,10 +278,6 @@ class StateManager:
             # 发送调试事件
             self._emit_debug_event(pane_id, event.signal, "ok", state_id=machine.state_id)
 
-            # 注册 auto-dismiss 定时器（DONE/FAILED 自动消失）
-            if change.new_status in {TaskStatus.DONE, TaskStatus.FAILED}:
-                self._register_auto_dismiss(pane_id, change.state_id)
-
             return DisplayUpdate(
                 pane_id=pane_id,
                 display_state=display_state,
@@ -349,149 +329,6 @@ class StateManager:
             if not last_entry.success:
                 return last_entry.description
         return ""
-
-    # === Timer 任务管理 ===
-
-    def _get_timer_task_name(self, pane_id: str, task_type: str) -> str:
-        """获取 Timer 任务名"""
-        return f"pane_{task_type}_{pane_id[:8]}"
-
-    def _register_auto_dismiss(self, pane_id: str, state_id: int) -> None:
-        """注册 auto-dismiss 定时器
-
-        DONE/FAILED 状态在 dwell 时间后自动消失。
-        """
-        if not self._timer:
-            return
-
-        pane_short = pane_id[:8]
-        task_name = self._get_timer_task_name(pane_id, "auto_dismiss")
-
-        # 取消旧的 auto-dismiss 任务
-        if self._timer.has_delay(task_name):
-            self._timer.cancel_delay(task_name)
-
-        def auto_dismiss():
-            display_state = self._display_states.get(pane_id)
-            if not display_state:
-                return
-
-            # 检查 state_id 是否仍然匹配
-            if display_state.state_id != state_id:
-                logger.debug(
-                    f"[StateManager:{pane_short}] Auto-dismiss skipped: "
-                    f"state_id changed ({display_state.state_id} != {state_id})"
-                )
-                return
-
-            # 检查状态是否仍为 DONE/FAILED
-            if display_state.status not in {TaskStatus.DONE, TaskStatus.FAILED}:
-                return
-
-            old_status = display_state.status
-
-            # 设置 recently_finished 提示并转到 IDLE
-            display_state.recently_finished = True
-            display_state.status = TaskStatus.IDLE
-
-            logger.info(
-                f"[StateManager:{pane_short}] Auto-dismiss: {old_status.value} → IDLE "
-                f"(dwell={AUTO_DISMISS_DWELL_SECONDS}s)"
-            )
-            metrics.inc("pane.auto_dismiss", {"pane": pane_short})
-
-            # 通知显示变化
-            self._notify_display_change(pane_id, display_state)
-
-            # 注册 recently_finished 提示清除
-            self._register_recently_finished_clear(pane_id, state_id)
-
-        self._timer.register_delay(task_name, AUTO_DISMISS_DWELL_SECONDS, auto_dismiss)
-        logger.debug(f"[StateManager:{pane_short}] Auto-dismiss scheduled in {AUTO_DISMISS_DWELL_SECONDS}s")
-
-    def _register_recently_finished_clear(self, pane_id: str, state_id: int) -> None:
-        """注册 recently_finished 提示清除定时器"""
-        if not self._timer:
-            return
-
-        pane_short = pane_id[:8]
-        task_name = self._get_timer_task_name(pane_id, "recently_finished")
-
-        def clear_hint():
-            display_state = self._display_states.get(pane_id)
-            if not display_state:
-                return
-
-            # 只在 state_id 未变化时清除
-            if display_state.state_id != state_id:
-                return
-            if not display_state.recently_finished:
-                return
-
-            display_state.recently_finished = False
-            logger.debug(f"[StateManager:{pane_short}] Cleared recently_finished hint")
-
-            self._notify_display_change(pane_id, display_state)
-
-        self._timer.register_delay(task_name, RECENTLY_FINISHED_HINT_SECONDS, clear_hint)
-
-    def _cancel_pane_timer_tasks(self, pane_id: str) -> None:
-        """取消 pane 的所有 Timer 任务"""
-        if not self._timer:
-            return
-
-        for task_type in ("auto_dismiss", "recently_finished"):
-            task_name = self._get_timer_task_name(pane_id, task_type)
-            if self._timer.has_delay(task_name):
-                self._timer.cancel_delay(task_name)
-
-    # === LONG_RUNNING 检查 ===
-
-    def tick_all(self) -> list[str]:
-        """检查所有 pane 的 LONG_RUNNING
-
-        由 Timer 周期调用。
-
-        Returns:
-            触发了 LONG_RUNNING 的 pane_id 列表
-        """
-        triggered = []
-
-        for pane_id, machine in self._machines.items():
-            if machine.should_check_long_running(LONG_RUNNING_THRESHOLD_SECONDS):
-                # 构造 timer.check 事件
-                duration = machine.get_running_duration()
-                elapsed = self._format_duration(duration)
-
-                event = HookEvent(
-                    source="timer",
-                    pane_id=pane_id,
-                    event_type="check",
-                    data={"elapsed": elapsed, "duration": duration},
-                    pane_generation=machine.pane_generation,
-                )
-
-                change = machine.process(event)
-                if change:
-                    # 更新显示状态
-                    self._update_display_state(pane_id, change)
-                    triggered.append(pane_id)
-                    # 更新队列的 state_id
-                    queue = self._queues.get(pane_id)
-                    if queue:
-                        queue.set_current_state_id(machine.state_id)
-                    # 发送调试事件
-                    self._emit_debug_event(pane_id, event.signal, "ok", state_id=machine.state_id)
-
-        return triggered
-
-    def _format_duration(self, seconds: float) -> str:
-        """格式化时长"""
-        if seconds < 60:
-            return f"{int(seconds)}s"
-        minutes = int(seconds // 60)
-        secs = int(seconds % 60)
-        return f"{minutes}m {secs}s"
 
     # === 状态查询 ===
 
@@ -654,9 +491,6 @@ class StateManager:
     def remove_pane(self, pane_id: str) -> None:
         """移除 pane"""
         pane_id = normalize_id(pane_id)
-
-        # 取消 Timer 任务
-        self._cancel_pane_timer_tasks(pane_id)
 
         self._machines.pop(pane_id, None)
         self._queues.pop(pane_id, None)

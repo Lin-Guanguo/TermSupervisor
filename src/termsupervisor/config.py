@@ -4,7 +4,6 @@
 - 轮询配置：内容读取间隔
 - 状态机配置：状态流转阈值
 - 队列配置：Actor 队列参数
-- Timer 配置：定时器参数
 - 显示配置：延迟显示
 - Focus 配置：防抖参数
 """
@@ -29,16 +28,10 @@ PROTECTED_SIGNALS = {
     "claude-code.SessionEnd",
 }  # 不可丢弃信号
 
-# === Timer 配置 ===
-TIMER_TICK_INTERVAL = 1.0  # Timer tick 间隔（秒）
-
 # === 状态机配置 ===
-LONG_RUNNING_THRESHOLD_SECONDS = 60.0  # RUNNING → LONG_RUNNING 阈值
 STATE_HISTORY_MAX_LENGTH = 30  # 内存中历史记录最大长度
 
 # === 显示层配置 ===
-AUTO_DISMISS_DWELL_SECONDS = 60.0  # DONE/FAILED 自动消失时间（秒），即使 focused
-RECENTLY_FINISHED_HINT_SECONDS = 10.0  # "recently finished" 提示持续时间（秒）
 QUIET_COMPLETION_THRESHOLD_SECONDS = 3.0  # 静默完成阈值（秒），短于此不闪烁
 
 # === Focus 防抖配置 ===

@@ -13,7 +13,7 @@ A real-time web dashboard that monitors all your iTerm2 panes. See terminal stat
 - **Real-time dashboard**: Mirrors the full iTerm2 layout with SVG rendering and per-pane status overlays.
 - **Layout controls**: Adjustable tabs-per-row (1–6) via settings drawer, hidden-tab dropdowns, context menu rename/hide, and inline "+ Tab" with layout presets.
 - **Interactive panes**: Click to activate in iTerm2, double-click to copy session ID, hover for path/process tooltip, focus badge indicator.
-- **State pipeline**: HookManager → StateManager (per-pane ActorQueue + display layer) → PaneStateMachine with Timer driving LONG_RUNNING and auto-dismiss.
+- **State pipeline**: HookManager → StateManager (per-pane ActorQueue + display layer) → PaneStateMachine.
 - **Content change detection**: 1s polling → ContentCleaner → PaneChangeQueue throttling; refresh on ≥5 changed lines or 10s timeout (Render Pipeline, independent from Event System).
 - **Notifications**: Floating panel with status colors; focus-aware suppression for <3s tasks or focused panes; auto-dismiss 60s after pane becomes IDLE.
 - **Debug panel**: Real-time state machine monitoring via WebSocket subscription.
@@ -21,7 +21,7 @@ A real-time web dashboard that monitors all your iTerm2 panes. See terminal stat
 ## Architecture
 
 ```
-Signal Sources (shell | claude-code | iterm focus | frontend click | timer.check)
+Signal Sources (shell | claude-code | iterm focus | frontend click)
         │
         ▼
 ┌──────────────────────────┐
@@ -29,35 +29,31 @@ Signal Sources (shell | claude-code | iterm focus | frontend click | timer.check
 └──────────┬───────────────┘
            ▼
 ┌──────────────────────────┐
-│      StateManager        │ per-pane ActorQueue + display + Timer tasks
+│      StateManager        │ per-pane ActorQueue + display layer
 └──────────┬───────────────┘
            ▼
 ┌────────────────┐
 │PaneStateMachine│
 │rules/history   │
 └────────────────┘
-        ▲
-        │
-   Timer.tick (LONG_RUNNING + auto-dismiss)
         │
         ▼
       Status → WebSocket/UI
 ```
 
-- `runtime/bootstrap.py` creates a single Timer + HookManager + Sources/Receiver.
+- `runtime/bootstrap.py` creates HookManager + Sources/Receiver.
 - **Event System**: HookManager → StateManager (state events only, no content events).
 - **Render Pipeline**: `TermSupervisor` polls iTerm2 → ContentCleaner → PaneChangeQueue → SVG refresh → WebSocket (independent from Event System).
 - Hook sources: Shell PromptMonitor, Claude Code HTTP hook, iTerm focus debounce (0.3s); frontend actions use JSON messages on `/ws`.
 
 ### State Machine
 
-6 states with explicit source isolation (no SOURCE_PRIORITY; rules use from_source):
+5 states with explicit source isolation (no SOURCE_PRIORITY; rules use from_source):
 
 | State | Trigger Events | Color | Visual Effect |
 |-------|---------------|-------|---------------|
 | IDLE | `idle_prompt`, `SessionEnd`, focus/click | - | Hidden |
 | RUNNING | `command_start`, `PreToolUse`, `SessionStart` | Blue | Rotating border |
-| LONG_RUNNING | RUNNING > 60s | Dark blue | Rotating border |
 | WAITING_APPROVAL | `Notification:permission_prompt` | Yellow | Blinking |
 | DONE | `command_end`(exit=0), `Stop` | Green | Blinking |
 | FAILED | `command_end`(exit≠0) | Red | Blinking |
@@ -193,7 +189,6 @@ QUEUE_HIGH_WATERMARK = 0.75
 TIMER_TICK_INTERVAL = 1.0
 
 # === State / Display ===
-LONG_RUNNING_THRESHOLD_SECONDS = 60.0
 STATE_HISTORY_MAX_LENGTH = 30
 DISPLAY_DELAY_SECONDS = 5.0
 NOTIFICATION_MIN_DURATION_SECONDS = 3.0

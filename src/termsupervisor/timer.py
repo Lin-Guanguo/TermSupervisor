@@ -6,10 +6,10 @@
 使用示例:
     timer = Timer()
 
-    # 注册周期任务（每秒检查 LONG_RUNNING）
-    timer.register_interval("long_running_check", 1.0, check_long_running)
+    # 注册周期任务（每秒执行）
+    timer.register_interval("heartbeat", 1.0, heartbeat_check)
 
-    # 注册延迟任务（5秒后清除状态）
+    # 注册延迟任务（5秒后执行）
     timer.register_delay("clear_pane_123", 5.0, lambda: clear_pane("123"))
 
     # 取消延迟任务

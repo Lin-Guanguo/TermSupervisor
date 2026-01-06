@@ -5,19 +5,12 @@ import pytest
 from termsupervisor.hooks.manager import HookManager
 from termsupervisor.state import TaskStatus
 from termsupervisor.telemetry import metrics
-from termsupervisor.timer import Timer
 
 
 @pytest.fixture
-def timer():
-    """创建测试用 Timer"""
-    return Timer(tick_interval=0.05)
-
-
-@pytest.fixture
-def manager(timer):
+def manager():
     """创建测试用 HookManager"""
-    return HookManager(timer=timer)
+    return HookManager()
 
 
 @pytest.fixture(autouse=True)
@@ -268,26 +261,6 @@ class TestCleanup:
 
         assert "pane-2" in closed
         assert "pane-2" not in manager.get_all_panes()
-
-
-class TestLongRunning:
-    """LONG_RUNNING 测试"""
-
-    async def test_tick_all_triggers_long_running(self, manager):
-        """tick_all 触发 LONG_RUNNING"""
-        await manager.process_shell_command_start("test-pane", "sleep 100")
-
-        # 手动设置 started_at 到过去
-        import time
-
-        machine = manager.state_manager.get_machine("test-pane")
-        machine._started_at = time.time() - 100  # 100秒前
-
-        # tick_all 应该触发
-        triggered = manager.tick_all()
-
-        assert "test-pane" in triggered
-        assert manager.get_status("test-pane") == TaskStatus.LONG_RUNNING
 
 
 class TestEmitEvent:

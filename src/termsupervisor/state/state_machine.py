@@ -41,7 +41,7 @@ class PaneStateMachine:
         pane_id: pane 标识
         status: 当前状态
         source: 状态来源
-        started_at: RUNNING 开始时间（用于计算 LONG_RUNNING）
+        started_at: RUNNING 开始时间（用于计算运行时长）
         state_id: 状态唯一 ID（每次成功流转自增）
         history: 状态变化历史（环形队列）
         pane_generation: pane 代次
@@ -276,20 +276,7 @@ class PaneStateMachine:
 
     def is_running(self) -> bool:
         """是否在运行中"""
-        return self._status in {TaskStatus.RUNNING, TaskStatus.LONG_RUNNING}
-
-    def should_check_long_running(self, threshold_seconds: float) -> bool:
-        """是否应该检查 LONG_RUNNING
-
-        Args:
-            threshold_seconds: 阈值（秒）
-
-        Returns:
-            是否应该触发 timer.check
-        """
-        if self._status != TaskStatus.RUNNING:
-            return False
-        return self.get_running_duration() > threshold_seconds
+        return self._status == TaskStatus.RUNNING
 
     def get_state_snapshot(self) -> StateSnapshot:
         """获取状态快照"""

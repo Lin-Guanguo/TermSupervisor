@@ -107,10 +107,6 @@ async def start_server(connection: iterm2.Connection):
 
     pipeline.set_waiting_provider(check_is_waiting)
 
-    # 启动 Timer（LONG_RUNNING 检查 + Pane 延迟任务）
-    timer_task = asyncio.create_task(components.timer.run())
-    print("[Timer] Timer 已启动")
-
     pipeline_task = asyncio.create_task(pipeline.run())
 
     # 定期同步 session 列表到 Shell Hook Source
@@ -134,9 +130,7 @@ async def start_server(connection: iterm2.Connection):
         await uvicorn_server.serve()
     finally:
         pipeline.stop()
-        components.timer.stop()
         pipeline_task.cancel()
-        timer_task.cancel()
         sync_task.cancel()
         await components.stop_sources()
 

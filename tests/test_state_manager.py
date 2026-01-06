@@ -11,19 +11,12 @@ from termsupervisor.state import (
     TaskStatus,
 )
 from termsupervisor.telemetry import metrics
-from termsupervisor.timer import Timer
 
 
 @pytest.fixture
-def timer():
-    """创建测试用 Timer"""
-    return Timer(tick_interval=0.05)
-
-
-@pytest.fixture
-def manager(timer):
+def manager():
     """创建测试用 StateManager"""
-    return StateManager(timer=timer)
+    return StateManager()
 
 
 @pytest.fixture(autouse=True)
@@ -145,44 +138,6 @@ class TestEventProcessing:
         # Phase 3.4: 使用新的 get_content/get_content_hash 方法
         assert manager.get_content("test-pane") == "new content"
         assert manager.get_content_hash("test-pane") == "hash123"
-
-class TestLongRunningCheck:
-    """LONG_RUNNING 检查测试"""
-
-    def test_tick_all_triggers_long_running(self, manager):
-        """tick_all 触发 LONG_RUNNING"""
-        # 创建 pane 并进入 RUNNING
-        manager.enqueue(
-            HookEvent(
-                source="shell",
-                pane_id="test-pane",
-                event_type="command_start",
-                data={"command": "sleep 100"},
-            )
-        )
-        # 直接处理（同步）
-        machine = manager.get_machine("test-pane")
-        machine.process(
-            HookEvent(
-                source="shell",
-                pane_id="test-pane",
-                event_type="command_start",
-                data={"command": "sleep 100"},
-                pane_generation=machine.pane_generation,
-            )
-        )
-
-        # 手动设置 started_at 到过去
-        import time
-
-        machine._started_at = time.time() - 100  # 100秒前
-
-        # tick_all 应该触发
-        triggered = manager.tick_all()
-
-        assert "test-pane" in triggered
-        assert machine.status == TaskStatus.LONG_RUNNING
-
 
 class TestCallbacks:
     """回调测试 (Phase 3.3: 改用返回值)"""
