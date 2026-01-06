@@ -61,7 +61,11 @@ class ChangeDetector:
             return True
 
         # 计算变化行数
-        changed_lines, _ = ContentCleaner.diff_lines(last_content, cleaned_content)
+        try:
+            changed_lines, _ = ContentCleaner.diff_lines(last_content, cleaned_content)
+        except Exception:
+            # diff_lines failed, trigger refresh as fallback
+            return True
 
         if changed_lines == 0:
             return False

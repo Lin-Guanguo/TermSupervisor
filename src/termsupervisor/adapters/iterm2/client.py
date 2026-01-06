@@ -71,7 +71,7 @@ class ITerm2Client:
                 return None
             return app.get_session_by_id(session_id)
         except Exception as e:
-            print(f"[ITerm2Client] 获取 session {session_id} 失败: {e}")
+            logger.warning(f"[ITerm2Client] 获取 session {session_id} 失败: {e}")
             return None
 
     async def activate_session(self, session_id: str) -> bool:
@@ -86,7 +86,7 @@ class ITerm2Client:
                 return True
             return False
         except Exception as e:
-            print(f"[ITerm2Client] 激活 session {session_id} 失败: {e}")
+            logger.warning(f"[ITerm2Client] 激活 session {session_id} 失败: {e}")
             return False
 
     async def rename_window(self, window_id: str, new_name: str) -> bool:
@@ -99,12 +99,12 @@ class ITerm2Client:
                 if window.window_id == window_id:
                     success = await set_window_name(window, new_name)
                     if success:
-                        print(f"[ITerm2Client] Window {window_id} 重命名为: {new_name}")
+                        logger.info(f"[ITerm2Client] Window {window_id} 重命名为: {new_name}")
                     return success
-            print(f"[ITerm2Client] 未找到 Window: {window_id}")
+            logger.warning(f"[ITerm2Client] 未找到 Window: {window_id}")
             return False
         except Exception as e:
-            print(f"[ITerm2Client] 重命名 Window {window_id} 失败: {e}")
+            logger.warning(f"[ITerm2Client] 重命名 Window {window_id} 失败: {e}")
             return False
 
     async def rename_tab(self, tab_id: str, new_name: str) -> bool:
@@ -118,12 +118,12 @@ class ITerm2Client:
                     if tab.tab_id == tab_id:
                         success = await set_tab_name(tab, new_name)
                         if success:
-                            print(f"[ITerm2Client] Tab {tab_id} 重命名为: {new_name}")
+                            logger.info(f"[ITerm2Client] Tab {tab_id} 重命名为: {new_name}")
                         return success
-            print(f"[ITerm2Client] 未找到 Tab: {tab_id}")
+            logger.warning(f"[ITerm2Client] 未找到 Tab: {tab_id}")
             return False
         except Exception as e:
-            print(f"[ITerm2Client] 重命名 Tab {tab_id} 失败: {e}")
+            logger.warning(f"[ITerm2Client] 重命名 Tab {tab_id} 失败: {e}")
             return False
 
     async def rename_session(self, session_id: str, new_name: str) -> bool:
@@ -136,12 +136,12 @@ class ITerm2Client:
             if session:
                 success = await set_session_name(session, new_name)
                 if success:
-                    print(f"[ITerm2Client] Session {session_id} 重命名为: {new_name}")
+                    logger.info(f"[ITerm2Client] Session {session_id} 重命名为: {new_name}")
                 return success
-            print(f"[ITerm2Client] 未找到 Session: {session_id}")
+            logger.warning(f"[ITerm2Client] 未找到 Session: {session_id}")
             return False
         except Exception as e:
-            print(f"[ITerm2Client] 重命名 Session {session_id} 失败: {e}")
+            logger.warning(f"[ITerm2Client] 重命名 Session {session_id} 失败: {e}")
             return False
 
     async def rename_item(self, item_type: str, item_id: str, new_name: str) -> bool:
@@ -153,7 +153,7 @@ class ITerm2Client:
         elif item_type == "session":
             return await self.rename_session(item_id, new_name)
         else:
-            print(f"[ITerm2Client] 未知类型: {item_type}")
+            logger.warning(f"[ITerm2Client] 未知类型: {item_type}")
             return False
 
     async def create_tab(self, window_id: str, layout: str = "single") -> bool:
@@ -172,12 +172,12 @@ class ITerm2Client:
                     tab = await window.async_create_tab()
                     if layout != "single":
                         await self._apply_layout(tab, layout)
-                    print(f"[ITerm2Client] 在 Window {window_id} 中创建了 {layout} 布局的 Tab")
+                    logger.info(f"[ITerm2Client] 在 Window {window_id} 中创建了 {layout} 布局的 Tab")
                     return True
-            print(f"[ITerm2Client] 未找到 Window: {window_id}")
+            logger.warning(f"[ITerm2Client] 未找到 Window: {window_id}")
             return False
         except Exception as e:
-            print(f"[ITerm2Client] 创建 Tab 失败: {e}")
+            logger.warning(f"[ITerm2Client] 创建 Tab 失败: {e}")
             return False
 
     async def _apply_layout(self, tab, layout: str):

@@ -5,9 +5,13 @@
 设置时同时更新 USER 变量和 iTerm2 内置属性。
 """
 
+import logging
+
 import iterm2
 
 from termsupervisor import config
+
+logger = logging.getLogger(__name__)
 
 # ==================== 获取名称 ====================
 
@@ -102,7 +106,7 @@ async def set_session_name(session: iterm2.Session, name: str) -> bool:
         await session.async_set_name(name)
         return True
     except Exception as e:
-        print(f"[naming] 设置 Session 名称失败: {e}")
+        logger.warning(f"[naming] 设置 Session 名称失败: {e}")
         return False
 
 
@@ -116,7 +120,7 @@ async def set_tab_name(tab: iterm2.Tab, name: str) -> bool:
         await tab.async_set_title(name)
         return True
     except Exception as e:
-        print(f"[naming] 设置 Tab 名称失败: {e}")
+        logger.warning(f"[naming] 设置 Tab 名称失败: {e}")
         return False
 
 
@@ -129,7 +133,7 @@ async def set_window_name(window: iterm2.Window, name: str) -> bool:
         await window.async_set_variable(config.USER_NAME_VAR, name)
         return True
     except Exception as e:
-        print(f"[naming] 设置 Window 名称失败: {e}")
+        logger.warning(f"[naming] 设置 Window 名称失败: {e}")
         return False
 
 

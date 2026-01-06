@@ -106,15 +106,9 @@ class ContentCleaner:
             - changed_lines: 变化行数（增加 + 删除）
             - diff_details: unified diff 行列表
         """
-        # 如果输入是原始内容，先清洗
-        old_lines = old.split("\n") if "\n" in old or not old else cls.clean_content(old)
-        new_lines = new.split("\n") if "\n" in new or not new else cls.clean_content(new)
-
-        # 如果输入已经是清洗后的字符串，直接拆分
-        if isinstance(old_lines, str):
-            old_lines = old_lines.split("\n")
-        if isinstance(new_lines, str):
-            new_lines = new_lines.split("\n")
+        # Split content into lines (expects pre-cleaned content)
+        old_lines = old.split("\n")
+        new_lines = new.split("\n")
 
         # 过滤空字符串
         old_lines = [line for line in old_lines if line]
