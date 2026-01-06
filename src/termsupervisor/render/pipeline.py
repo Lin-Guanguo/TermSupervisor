@@ -10,6 +10,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from termsupervisor import config
+from termsupervisor.adapters import JobMetadata, TerminalAdapter
 from termsupervisor.analysis import ContentCleaner
 from termsupervisor.core.ids import id_match, normalize_id
 from termsupervisor.state import PaneStatusDisplay, PaneStatusInfo, TaskStatus
@@ -20,8 +21,6 @@ from .poller import ContentPoller
 from .types import LayoutUpdate
 
 if TYPE_CHECKING:
-    from termsupervisor.adapters.iterm2 import ITerm2Client
-    from termsupervisor.adapters.iterm2.client import JobMetadata
     from termsupervisor.adapters.iterm2.models import LayoutData
 
 logger = logging.getLogger(__name__)
@@ -48,7 +47,7 @@ class RenderPipeline:
 
     def __init__(
         self,
-        iterm_client: "ITerm2Client",
+        adapter: TerminalAdapter,
         exclude_names: list[str] | None = None,
         refresh_lines: int | None = None,
         waiting_refresh_lines: int | None = None,
@@ -57,13 +56,13 @@ class RenderPipeline:
         """Initialize the render pipeline.
 
         Args:
-            iterm_client: iTerm2 client for terminal access
-            exclude_names: Tab/pane names to exclude from monitoring
+            adapter: Terminal adapter for terminal access
+            exclude_names: Tab/pane names to exclude (passed to adapter)
             refresh_lines: Minimum changed lines to trigger refresh
             waiting_refresh_lines: Changed lines threshold when WAITING
             flush_timeout: Maximum time between refreshes
         """
-        self._poller = ContentPoller(iterm_client, exclude_names)
+        self._poller = ContentPoller(adapter, exclude_names)
         self._detector = ChangeDetector(
             refresh_lines=refresh_lines,
             waiting_refresh_lines=waiting_refresh_lines,
@@ -236,7 +235,7 @@ class RenderPipeline:
             return state.current.content
         return None
 
-    def get_job_metadata(self, pane_id: str) -> "JobMetadata | None":
+    def get_job_metadata(self, pane_id: str) -> JobMetadata | None:
         """Get cached job metadata for a pane.
 
         Args:

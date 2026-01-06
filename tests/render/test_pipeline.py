@@ -1,31 +1,32 @@
 """Tests for render/pipeline.py"""
 
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime
 
 import pytest
 
-from termsupervisor.render.pipeline import RenderPipeline
-from termsupervisor.render.types import LayoutUpdate
 from termsupervisor.adapters.iterm2.models import (
     LayoutData,
-    WindowInfo,
-    TabInfo,
     PaneInfo,
+    TabInfo,
+    WindowInfo,
 )
+from termsupervisor.render.pipeline import RenderPipeline
+from termsupervisor.render.types import LayoutUpdate
 
 
 class TestRenderPipeline:
     """Tests for RenderPipeline class."""
 
-    def _create_mock_client(self):
-        """Create a mock ITerm2Client."""
-        return MagicMock()
+    def _create_mock_adapter(self):
+        """Create a mock TerminalAdapter."""
+        adapter = MagicMock()
+        adapter.name = "mock"
+        return adapter
 
     def test_init(self):
         """Test pipeline initialization."""
-        mock_client = self._create_mock_client()
-        pipeline = RenderPipeline(mock_client)
+        mock_adapter = self._create_mock_adapter()
+        pipeline = RenderPipeline(mock_adapter)
 
         assert pipeline._poller is not None
         assert pipeline._detector is not None
@@ -35,9 +36,9 @@ class TestRenderPipeline:
 
     def test_init_with_options(self):
         """Test pipeline initialization with options."""
-        mock_client = self._create_mock_client()
+        mock_adapter = self._create_mock_adapter()
         pipeline = RenderPipeline(
-            mock_client,
+            mock_adapter,
             exclude_names=["htop"],
             refresh_lines=10,
             waiting_refresh_lines=2,
@@ -48,20 +49,20 @@ class TestRenderPipeline:
 
     def test_cache_property(self):
         """Test cache property access."""
-        mock_client = self._create_mock_client()
-        pipeline = RenderPipeline(mock_client)
+        mock_adapter = self._create_mock_adapter()
+        pipeline = RenderPipeline(mock_adapter)
         assert pipeline.cache is pipeline._cache
 
     def test_layout_property(self):
         """Test layout property access."""
-        mock_client = self._create_mock_client()
-        pipeline = RenderPipeline(mock_client)
+        mock_adapter = self._create_mock_adapter()
+        pipeline = RenderPipeline(mock_adapter)
         assert pipeline.layout == pipeline._cache.layout
 
     def test_on_update_callback(self):
         """Test registering update callback."""
-        mock_client = self._create_mock_client()
-        pipeline = RenderPipeline(mock_client)
+        mock_adapter = self._create_mock_adapter()
+        pipeline = RenderPipeline(mock_adapter)
 
         callback = AsyncMock()
         pipeline.on_update(callback)
@@ -71,8 +72,8 @@ class TestRenderPipeline:
     @pytest.mark.asyncio
     async def test_tick_no_layout(self):
         """Test tick when layout is unavailable."""
-        mock_client = self._create_mock_client()
-        pipeline = RenderPipeline(mock_client)
+        mock_adapter = self._create_mock_adapter()
+        pipeline = RenderPipeline(mock_adapter)
 
         with patch.object(pipeline._poller, "poll_layout", return_value=None):
             update = await pipeline.tick()
@@ -83,8 +84,8 @@ class TestRenderPipeline:
     @pytest.mark.asyncio
     async def test_tick_with_panes(self):
         """Test tick with panes in layout."""
-        mock_client = self._create_mock_client()
-        pipeline = RenderPipeline(mock_client)
+        mock_adapter = self._create_mock_adapter()
+        pipeline = RenderPipeline(mock_adapter)
 
         # Create mock layout
         pane = PaneInfo(
@@ -125,8 +126,8 @@ class TestRenderPipeline:
     @pytest.mark.asyncio
     async def test_tick_no_content_change(self):
         """Test tick when content hasn't changed."""
-        mock_client = self._create_mock_client()
-        pipeline = RenderPipeline(mock_client)
+        mock_adapter = self._create_mock_adapter()
+        pipeline = RenderPipeline(mock_adapter)
 
         pane = PaneInfo(
             pane_id="pane-1",
@@ -168,8 +169,8 @@ class TestRenderPipeline:
     @pytest.mark.asyncio
     async def test_tick_with_status_provider_waiting(self):
         """Test tick derives is_waiting from status_provider."""
-        mock_client = self._create_mock_client()
-        pipeline = RenderPipeline(mock_client)
+        mock_adapter = self._create_mock_adapter()
+        pipeline = RenderPipeline(mock_adapter)
 
         # Set status provider that returns WAITING status for pane-1
         def status_provider(pane_id):
@@ -217,8 +218,8 @@ class TestRenderPipeline:
     @pytest.mark.asyncio
     async def test_tick_notifies_callbacks(self):
         """Test tick notifies registered callbacks."""
-        mock_client = self._create_mock_client()
-        pipeline = RenderPipeline(mock_client)
+        mock_adapter = self._create_mock_adapter()
+        pipeline = RenderPipeline(mock_adapter)
 
         callback = AsyncMock()
         pipeline.on_update(callback)
@@ -239,8 +240,8 @@ class TestRenderPipeline:
     @pytest.mark.asyncio
     async def test_tick_callback_error_handled(self):
         """Test tick handles callback errors gracefully."""
-        mock_client = self._create_mock_client()
-        pipeline = RenderPipeline(mock_client)
+        mock_adapter = self._create_mock_adapter()
+        pipeline = RenderPipeline(mock_adapter)
 
         error_callback = AsyncMock(side_effect=Exception("callback error"))
         success_callback = AsyncMock()
@@ -263,8 +264,8 @@ class TestRenderPipeline:
     @pytest.mark.asyncio
     async def test_tick_cleans_up_closed_panes(self):
         """Test tick cleans up closed panes."""
-        mock_client = self._create_mock_client()
-        pipeline = RenderPipeline(mock_client)
+        mock_adapter = self._create_mock_adapter()
+        pipeline = RenderPipeline(mock_adapter)
 
         # Initial layout with two panes
         pane1 = PaneInfo(
@@ -326,8 +327,8 @@ class TestRenderPipeline:
 
     def test_stop(self):
         """Test stop method."""
-        mock_client = self._create_mock_client()
-        pipeline = RenderPipeline(mock_client)
+        mock_adapter = self._create_mock_adapter()
+        pipeline = RenderPipeline(mock_adapter)
 
         pipeline._running = True
         pipeline.stop()
@@ -336,8 +337,8 @@ class TestRenderPipeline:
 
     def test_get_pane_content(self):
         """Test getting cached pane content."""
-        mock_client = self._create_mock_client()
-        pipeline = RenderPipeline(mock_client)
+        mock_adapter = self._create_mock_adapter()
+        pipeline = RenderPipeline(mock_adapter)
 
         # No content initially
         assert pipeline.get_pane_content("pane-1") is None
@@ -355,8 +356,8 @@ class TestRenderPipeline:
 
     def test_get_job_metadata(self):
         """Test getting cached job metadata."""
-        mock_client = self._create_mock_client()
-        pipeline = RenderPipeline(mock_client)
+        mock_adapter = self._create_mock_adapter()
+        pipeline = RenderPipeline(mock_adapter)
 
         # No metadata initially
         assert pipeline.get_job_metadata("pane-1") is None

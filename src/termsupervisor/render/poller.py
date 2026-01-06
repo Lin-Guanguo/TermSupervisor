@@ -5,29 +5,36 @@
 
 from typing import TYPE_CHECKING
 
-from termsupervisor.adapters.iterm2 import get_layout
+from termsupervisor.adapters import JobMetadata, TerminalAdapter
 from termsupervisor.adapters.iterm2.models import LayoutData
 
 if TYPE_CHECKING:
-    from termsupervisor.adapters.iterm2 import ITerm2Client
-    from termsupervisor.adapters.iterm2.client import JobMetadata
+    pass
 
 
 class ContentPoller:
     """内容轮询器
 
     负责：
-    - 获取 iTerm2 布局
+    - 获取终端布局
     - 获取 pane 内容
     - 获取 job metadata
+
+    Uses TerminalAdapter protocol for terminal-agnostic operation.
     """
 
     def __init__(
         self,
-        iterm_client: "ITerm2Client",
+        adapter: TerminalAdapter,
         exclude_names: list[str] | None = None,
     ):
-        self._client = iterm_client
+        """Initialize content poller.
+
+        Args:
+            adapter: Terminal adapter implementing TerminalAdapter protocol
+            exclude_names: Tab/pane names to exclude (handled by adapter)
+        """
+        self._adapter = adapter
         self._exclude_names = exclude_names or []
 
     async def poll_layout(self) -> LayoutData | None:
@@ -36,10 +43,7 @@ class ContentPoller:
         Returns:
             布局数据，如果无法获取返回 None
         """
-        app = await self._client.get_app()
-        if app is None:
-            return None
-        return await get_layout(app, self._exclude_names)
+        return await self._adapter.get_layout()
 
     async def get_pane_content(self, pane_id: str) -> str | None:
         """获取 pane 内容
@@ -50,17 +54,9 @@ class ContentPoller:
         Returns:
             pane 内容，如果无法获取返回 None
         """
-        app = await self._client.get_app()
-        if app is None:
-            return None
+        return await self._adapter.get_pane_content(pane_id)
 
-        session = app.get_session_by_id(pane_id)
-        if session is None:
-            return None
-
-        return await self._client.get_session_content(session)
-
-    async def get_job_metadata(self, pane_id: str) -> "JobMetadata | None":
+    async def get_job_metadata(self, pane_id: str) -> JobMetadata | None:
         """获取 pane 的 job metadata
 
         Args:
@@ -69,12 +65,4 @@ class ContentPoller:
         Returns:
             job metadata，如果无法获取返回 None
         """
-        app = await self._client.get_app()
-        if app is None:
-            return None
-
-        session = app.get_session_by_id(pane_id)
-        if session is None:
-            return None
-
-        return await self._client.get_session_job_metadata(session)
+        return await self._adapter.get_job_metadata(pane_id)

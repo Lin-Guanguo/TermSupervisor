@@ -54,7 +54,8 @@ def test_render_pipeline_import():
 
     from termsupervisor.render import RenderPipeline
 
-    mock_client = MagicMock()
-    pipeline = RenderPipeline(iterm_client=mock_client)
+    mock_adapter = MagicMock()
+    mock_adapter.name = "mock"
+    pipeline = RenderPipeline(adapter=mock_adapter)
     assert pipeline._running is False
     assert pipeline._callbacks == []

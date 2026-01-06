@@ -7,7 +7,7 @@ import iterm2
 import uvicorn
 
 from termsupervisor import config
-from termsupervisor.adapters.iterm2 import ITerm2Client
+from termsupervisor.adapters.iterm2 import ITerm2Adapter, ITerm2Client
 from termsupervisor.render import RenderPipeline
 from termsupervisor.runtime import RuntimeComponents, bootstrap
 from termsupervisor.state import PaneStatusInfo
@@ -68,10 +68,12 @@ async def setup_hook_system(server: WebServer, connection: iterm2.Connection) ->
 
 async def start_server(connection: iterm2.Connection):
     """启动服务器"""
-    iterm_client = ITerm2Client(connection)
+    # Create adapter wrapping iTerm2 connection
+    adapter = ITerm2Adapter(connection, exclude_names=config.EXCLUDE_NAMES)
+    iterm_client = adapter.client  # Access underlying client for operations
 
     pipeline = RenderPipeline(
-        iterm_client=iterm_client,
+        adapter=adapter,
         exclude_names=config.EXCLUDE_NAMES,
     )
 
