@@ -3,7 +3,7 @@
 import logging
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -19,7 +19,7 @@ class HookEventRequest(BaseModel):
     source: str  # 来源: "claude-code", "gemini", "codex"
     event: str  # 事件类型
     pane_id: str  # iTerm2 session_id ($ITERM_SESSION_ID)
-    data: dict = {}  # 额外数据
+    data: dict = Field(default_factory=dict)  # 额外数据
 
 
 class HookEventResponse(BaseModel):

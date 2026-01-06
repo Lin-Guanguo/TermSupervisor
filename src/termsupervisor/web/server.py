@@ -179,9 +179,10 @@ class WebServer:
             except Exception as e:
                 logger.debug(f"Failed to send to client: {e}")
                 disconnected.append(client)
-        # Remove disconnected clients
+        # Remove disconnected clients (safe removal to avoid race with disconnect handler)
         for client in disconnected:
-            self.clients.remove(client)
+            if client in self.clients:
+                self.clients.remove(client)
             self._debug_subscribers.discard(client)
 
     async def broadcast_debug_event(self, event: dict):

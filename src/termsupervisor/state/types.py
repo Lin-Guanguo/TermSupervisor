@@ -326,7 +326,8 @@ class TransitionRule:
                 if match:
                     length = int(match.group(1))
                     truncated = str(value)[:length]
-                    result = re.sub(pattern, truncated, result)
+                    # Use lambda to avoid backslash interpretation in replacement
+                    result = re.sub(pattern, lambda m: truncated, result)
                 else:
                     result = result.replace(f"{{{key}}}", str(value))
 
