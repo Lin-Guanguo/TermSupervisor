@@ -1,6 +1,15 @@
 # Tmux Integration Implementation Plan
 
-Last Updated: 2025-01-07
+Last Updated: 2026-01-07
+
+## Status: Phases 1-4 Complete
+
+Core tmux integration is implemented:
+- ✅ Phase 1: TerminalAdapter protocol + iTerm2 adapter
+- ✅ Phase 2: TmuxClient core implementation
+- ✅ Phase 3: TmuxAdapter + integration
+- ✅ Phase 4: Hook system integration (focus events)
+- 🔄 Phase 5: Final review (in progress)
 
 ## Overview
 
