@@ -68,16 +68,6 @@ class TestRenderPipeline:
 
         assert callback in pipeline._callbacks
 
-    def test_set_waiting_provider(self):
-        """Test setting waiting provider."""
-        mock_client = self._create_mock_client()
-        pipeline = RenderPipeline(mock_client)
-
-        provider = lambda pane_id: pane_id == "pane-1"
-        pipeline.set_waiting_provider(provider)
-
-        assert pipeline._waiting_provider == provider
-
     @pytest.mark.asyncio
     async def test_tick_no_layout(self):
         """Test tick when layout is unavailable."""
@@ -176,13 +166,18 @@ class TestRenderPipeline:
                     assert "pane-1" not in update.updated_panes
 
     @pytest.mark.asyncio
-    async def test_tick_with_waiting_provider(self):
-        """Test tick uses waiting provider."""
+    async def test_tick_with_status_provider_waiting(self):
+        """Test tick derives is_waiting from status_provider."""
         mock_client = self._create_mock_client()
         pipeline = RenderPipeline(mock_client)
 
-        # Set waiting provider
-        pipeline.set_waiting_provider(lambda pane_id: pane_id == "pane-1")
+        # Set status provider that returns WAITING status for pane-1
+        def status_provider(pane_id):
+            if pane_id == "pane-1":
+                return {"status": "waiting_approval", "status_color": "yellow"}
+            return None
+
+        pipeline.set_status_provider(status_provider)
 
         pane = PaneInfo(
             pane_id="pane-1",

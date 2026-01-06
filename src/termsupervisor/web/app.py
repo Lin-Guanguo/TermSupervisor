@@ -10,7 +10,6 @@ from termsupervisor import config
 from termsupervisor.adapters.iterm2 import ITerm2Client
 from termsupervisor.render import RenderPipeline
 from termsupervisor.runtime import RuntimeComponents, bootstrap
-from termsupervisor.state import TaskStatus
 from termsupervisor.web.server import WebServer
 
 logger = logging.getLogger(__name__)
@@ -99,13 +98,6 @@ async def start_server(connection: iterm2.Connection):
         return None
 
     pipeline.set_status_provider(get_pane_status)
-
-    # 设置 WAITING 状态检查器（用于渲染阈值调整）
-    def check_is_waiting(pane_id: str) -> bool:
-        status = components.hook_manager.get_status(pane_id)
-        return status == TaskStatus.WAITING_APPROVAL
-
-    pipeline.set_waiting_provider(check_is_waiting)
 
     pipeline_task = asyncio.create_task(pipeline.run())
 

@@ -73,8 +73,7 @@ class RenderPipeline:
         self._callbacks: list[LayoutUpdateCallback] = []
         self._running = False
 
-        # External state providers (e.g., HookManager)
-        self._waiting_provider: Callable[[str], bool] | None = None
+        # External state provider (e.g., HookManager)
         self._status_provider: StatusProviderCallback | None = None
 
     @property
@@ -86,14 +85,6 @@ class RenderPipeline:
     def layout(self) -> "LayoutData":
         """Get current layout data."""
         return self._cache.layout
-
-    def set_waiting_provider(self, provider: Callable[[str], bool]) -> None:
-        """Set callback to check if a pane is in WAITING state.
-
-        Args:
-            provider: Function that returns True if pane_id is WAITING
-        """
-        self._waiting_provider = provider
 
     def on_update(self, callback: LayoutUpdateCallback) -> None:
         """Register a callback for layout updates.
@@ -143,10 +134,11 @@ class RenderPipeline:
                     # Get job metadata
                     job = await self._poller.get_job_metadata(pane_id)
 
-                    # Check WAITING state
+                    # Check WAITING state (derive from status_provider)
                     is_waiting = False
-                    if self._waiting_provider:
-                        is_waiting = self._waiting_provider(pane_id)
+                    if self._status_provider:
+                        status_info = self._status_provider(pane_id)
+                        is_waiting = status_info is not None and status_info.get("status") == "waiting_approval"
 
                     # Clean content and compute hash
                     cleaned_content = ContentCleaner.clean_content_str(content)
