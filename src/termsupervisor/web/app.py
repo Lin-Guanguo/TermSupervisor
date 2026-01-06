@@ -2,23 +2,41 @@
 
 import asyncio
 import logging
+from typing import TYPE_CHECKING
 
 import iterm2
 import uvicorn
 
 from termsupervisor import config
-from termsupervisor.adapters.iterm2 import ITerm2Adapter, ITerm2Client
+from termsupervisor.adapters import TerminalAdapter
+from termsupervisor.adapters.iterm2 import ITerm2Adapter
 from termsupervisor.render import RenderPipeline
 from termsupervisor.runtime import RuntimeComponents, bootstrap
 from termsupervisor.state import PaneStatusInfo
 from termsupervisor.web.server import WebServer
 
+if TYPE_CHECKING:
+    from termsupervisor.adapters.iterm2 import ITerm2Client
+
 logger = logging.getLogger(__name__)
 
 
-def create_app(pipeline: RenderPipeline, iterm_client: ITerm2Client) -> WebServer:
-    """创建 Web 应用"""
-    return WebServer(pipeline, iterm_client)
+def create_app(
+    pipeline: RenderPipeline,
+    adapter: TerminalAdapter,
+    iterm_client: "ITerm2Client | None" = None,
+) -> WebServer:
+    """创建 Web 应用
+
+    Args:
+        pipeline: Render pipeline
+        adapter: Terminal adapter
+        iterm_client: Optional iTerm2 client for iTerm2-specific features
+
+    Returns:
+        WebServer instance
+    """
+    return WebServer(pipeline, adapter=adapter, iterm_client=iterm_client)
 
 
 async def setup_hook_system(server: WebServer, connection: iterm2.Connection) -> RuntimeComponents:
@@ -70,14 +88,14 @@ async def start_server(connection: iterm2.Connection):
     """启动服务器"""
     # Create adapter wrapping iTerm2 connection
     adapter = ITerm2Adapter(connection, exclude_names=config.EXCLUDE_NAMES)
-    iterm_client = adapter.client  # Access underlying client for operations
+    iterm_client = adapter.client  # Access underlying client for iTerm2-specific ops
 
     pipeline = RenderPipeline(
         adapter=adapter,
         exclude_names=config.EXCLUDE_NAMES,
     )
 
-    server = create_app(pipeline, iterm_client)
+    server = create_app(pipeline, adapter=adapter, iterm_client=iterm_client)
 
     # 初始化 Hook 系统（状态管理的唯一来源）
     components = await setup_hook_system(server, connection)

@@ -14,11 +14,12 @@ from typing import TYPE_CHECKING
 
 from fastapi import WebSocket
 
-from termsupervisor.adapters.iterm2 import ITerm2Client
+from termsupervisor.adapters import TerminalAdapter
 from termsupervisor.render import RenderPipeline
 from termsupervisor.telemetry import get_logger
 
 if TYPE_CHECKING:
+    from termsupervisor.adapters.iterm2 import ITerm2Client
     from termsupervisor.hooks import HookManager
     from termsupervisor.web.server import WebServer
 
@@ -32,11 +33,13 @@ class MessageHandler:
     使用 JSON 格式的 action 消息。
     """
 
-    iterm_client: ITerm2Client
+    adapter: TerminalAdapter
     pipeline: RenderPipeline
     broadcast: Callable[[dict], Awaitable[None]]
     hook_manager: "HookManager | None" = field(default=None)
     web_server: "WebServer | None" = field(default=None)
+    # Optional iTerm2 client for iTerm2-specific operations (create_tab, rename_item)
+    iterm_client: "ITerm2Client | None" = field(default=None)
 
     async def handle(self, websocket: WebSocket, data: str):
         """处理 WebSocket 消息
@@ -84,7 +87,8 @@ class MessageHandler:
                 event_type="click_pane",
             )
 
-        success = await self.iterm_client.activate_session(pane_id)
+        # Use adapter for activation (works with any terminal)
+        success = await self.adapter.activate_pane(pane_id)
         await websocket.send_json(
             {"type": "activate_result", "pane_id": pane_id, "success": success}
         )
@@ -123,7 +127,16 @@ class MessageHandler:
             logger.warning(f"[WS] Rename missing required fields: {msg}")
             return False
 
-        success = await self.iterm_client.rename_item(target_type, target_id, name)
+        # For session/pane rename, use adapter (works with any terminal)
+        if target_type == "session":
+            success = await self.adapter.rename_pane(target_id, name)
+        elif self.iterm_client:
+            # For tab/window rename, fall back to iTerm2 client
+            success = await self.iterm_client.rename_item(target_type, target_id, name)
+        else:
+            logger.warning(f"[WS] Rename for {target_type} not supported on this terminal")
+            return False
+
         if success:
             await self.pipeline.check_updates()
             await self.broadcast(self.pipeline.get_layout_dict())
@@ -134,6 +147,11 @@ class MessageHandler:
         window_id = msg.get("window_id")
         if not window_id:
             logger.warning(f"[WS] Create tab missing window_id: {msg}")
+            return False
+
+        # create_tab is iTerm2-specific for now
+        if not self.iterm_client:
+            logger.warning("[WS] Create tab not supported on this terminal")
             return False
 
         layout = msg.get("layout", "single")

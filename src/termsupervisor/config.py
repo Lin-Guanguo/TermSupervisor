@@ -1,12 +1,20 @@
 """TermSupervisor 配置
 
 配置分为以下几类：
+- 终端适配器配置：选择终端类型
 - 轮询配置：内容读取间隔
 - 状态机配置：状态流转阈值
 - 队列配置：Actor 队列参数
 - 显示配置：延迟显示
 - Focus 配置：防抖参数
 """
+
+import os
+
+# === 终端适配器配置 ===
+# Options: "iterm2", "tmux", "auto"
+# "auto" detects based on environment ($TMUX for tmux, else iTerm2)
+TERMINAL_ADAPTER = os.environ.get("TERMINAL_ADAPTER", "iterm2")
 
 # === 轮询配置 ===
 POLL_INTERVAL = 1.0  # 内容读取间隔（秒）

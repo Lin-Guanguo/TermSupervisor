@@ -10,22 +10,29 @@ logger = logging.getLogger(__name__)
 from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 
-from termsupervisor.adapters.iterm2 import ITerm2Client
+from termsupervisor.adapters import TerminalAdapter
 from termsupervisor.render import RenderPipeline, TerminalRenderer
 from termsupervisor.render.types import LayoutUpdate
 from termsupervisor.web.handlers import MessageHandler
 
 if TYPE_CHECKING:
+    from termsupervisor.adapters.iterm2 import ITerm2Client
     from termsupervisor.hooks import HookReceiver
 
 
 class WebServer:
     """WebSocket 服务器"""
 
-    def __init__(self, pipeline: RenderPipeline, iterm_client: ITerm2Client):
+    def __init__(
+        self,
+        pipeline: RenderPipeline,
+        adapter: TerminalAdapter,
+        iterm_client: "ITerm2Client | None" = None,
+    ):
         self.app = FastAPI(title="TermSupervisor")
         self.pipeline = pipeline
-        self.iterm_client = iterm_client
+        self.adapter = adapter
+        self.iterm_client = iterm_client  # Optional, for iTerm2-specific features
         self.clients: list[WebSocket] = []
         self._hook_receiver: HookReceiver | None = None
         self._renderer = TerminalRenderer()
@@ -36,10 +43,11 @@ class WebServer:
         self.templates = Jinja2Templates(directory=str(templates_dir))
 
         self._handler = MessageHandler(
-            iterm_client=iterm_client,
+            adapter=adapter,
             pipeline=pipeline,
             broadcast=self.broadcast,
             web_server=self,
+            iterm_client=iterm_client,
         )
 
         self._setup_routes()
@@ -79,7 +87,17 @@ class WebServer:
 
         @self.app.get("/api/pane/{pane_id}/svg")
         async def get_pane_svg(pane_id: str):
-            """获取指定 pane 的 SVG 渲染图。"""
+            """获取指定 pane 的 SVG 渲染图。
+
+            Note: SVG rendering is only available for iTerm2.
+            """
+            if not self.iterm_client:
+                return Response(
+                    content="SVG rendering not available for this terminal",
+                    status_code=501,
+                    media_type="text/plain",
+                )
+
             session = await self.iterm_client.get_session_by_id(pane_id)
             if not session:
                 return Response(
