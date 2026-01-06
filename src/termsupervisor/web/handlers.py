@@ -2,7 +2,7 @@
 
 JSON 格式：
 - {"action": "activate", "pane_id": "xxx"}
-- {"action": "rename", "type": "pane|tab|window", "id": "xxx", "name": "yyy"}
+- {"action": "rename", "type": "session|tab|window", "id": "xxx", "name": "yyy"}
 - {"action": "create_tab", "window_id": "xxx", "layout": "single|split"}
 - {"action": "debug_subscribe", "subscribe": true|false}
 """
@@ -92,7 +92,7 @@ class MessageHandler:
     async def _handle_rename_action(self, websocket: WebSocket, msg: dict):
         """处理重命名请求
 
-        JSON 格式: {"action": "rename", "type": "pane|tab|window", "id": "xxx", "name": "yyy"}
+        JSON 格式: {"action": "rename", "type": "session|tab|window", "id": "xxx", "name": "yyy"}
         """
         success = await self._handle_rename(msg)
         await websocket.send_json(
