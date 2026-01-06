@@ -12,8 +12,8 @@
 | C4 | * | * | claude-code.Notification:permission_prompt | WAITING | claude-code |
 | C5 | * | * | claude-code.Notification:idle_prompt | IDLE | claude-code |
 | C6 | * | * | claude-code.SessionEnd | IDLE | claude-code |
-| U1 | WAITING | * | iterm.focus / frontend.click_pane | IDLE | user |
-| U2 | DONE|FAILED | * | iterm.focus / frontend.click_pane | IDLE | user |
+| U1 | WAITING | * | iterm.focus / tmux.focus / frontend.click_pane | IDLE | user |
+| U2 | DONE|FAILED | * | iterm.focus / tmux.focus / frontend.click_pane | IDLE | user |
 """
 
 from .predicates import (
@@ -122,12 +122,22 @@ C6_CLAUDE_SESSION_END = TransitionRule(
 )
 
 
-# === User 规则（iterm/frontend）===
+# === User 规则（iterm/tmux/frontend）===
 
-U1_USER_CLEAR_WAITING = TransitionRule(
+U1_USER_CLEAR_WAITING_ITERM = TransitionRule(
     from_status={TaskStatus.WAITING_APPROVAL},
     from_source=None,  # 任意来源
     signal_pattern="iterm.focus",
+    to_status=TaskStatus.IDLE,
+    to_source="user",
+    description_template="",
+    reset_started_at=True,
+)
+
+U1_USER_CLEAR_WAITING_TMUX = TransitionRule(
+    from_status={TaskStatus.WAITING_APPROVAL},
+    from_source=None,
+    signal_pattern="tmux.focus",
     to_status=TaskStatus.IDLE,
     to_source="user",
     description_template="",
@@ -144,10 +154,20 @@ U1_USER_CLEAR_WAITING_CLICK = TransitionRule(
     reset_started_at=True,
 )
 
-U2_USER_CLEAR_DONE_FAILED = TransitionRule(
+U2_USER_CLEAR_DONE_FAILED_ITERM = TransitionRule(
     from_status={TaskStatus.DONE, TaskStatus.FAILED},
     from_source=None,
     signal_pattern="iterm.focus",
+    to_status=TaskStatus.IDLE,
+    to_source="user",
+    description_template="",
+    reset_started_at=True,
+)
+
+U2_USER_CLEAR_DONE_FAILED_TMUX = TransitionRule(
+    from_status={TaskStatus.DONE, TaskStatus.FAILED},
+    from_source=None,
+    signal_pattern="tmux.focus",
     to_status=TaskStatus.IDLE,
     to_source="user",
     description_template="",
@@ -180,10 +200,12 @@ TRANSITION_RULES: list[TransitionRule] = [
     C4_CLAUDE_PERMISSION_PROMPT,
     C5_CLAUDE_IDLE_PROMPT,
     C6_CLAUDE_SESSION_END,
-    # User 规则
-    U1_USER_CLEAR_WAITING,
+    # User 规则 (iterm/tmux/frontend)
+    U1_USER_CLEAR_WAITING_ITERM,
+    U1_USER_CLEAR_WAITING_TMUX,
     U1_USER_CLEAR_WAITING_CLICK,
-    U2_USER_CLEAR_DONE_FAILED,
+    U2_USER_CLEAR_DONE_FAILED_ITERM,
+    U2_USER_CLEAR_DONE_FAILED_TMUX,
     U2_USER_CLEAR_DONE_FAILED_CLICK,
 ]
 
