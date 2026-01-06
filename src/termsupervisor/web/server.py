@@ -166,8 +166,9 @@ class WebServer:
                     data = await websocket.receive_text()
                     await self._handler.handle(websocket, data)
             except WebSocketDisconnect:
-                self.clients.remove(websocket)
-                # Clean up debug subscription
+                # Safe removal to avoid race with broadcast cleanup
+                if websocket in self.clients:
+                    self.clients.remove(websocket)
                 self._debug_subscribers.discard(websocket)
 
     async def broadcast(self, data: dict):

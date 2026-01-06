@@ -2124,7 +2124,7 @@
                 const paneId = paneData.pane_id;
                 copyToClipboard(paneId, `Copied: ${paneId.substring(0, 8)}...`);
             };
-            paneEl.oncontextmenu = (e) => showContextMenu(e, 'pane', paneData.pane_id, paneData.name);
+            paneEl.oncontextmenu = (e) => showContextMenu(e, 'session', paneData.pane_id, paneData.name);
 
             // Hover tooltip
             paneEl.onmouseenter = (e) => showPaneTooltip(paneData.pane_id, e);
