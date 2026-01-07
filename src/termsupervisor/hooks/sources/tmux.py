@@ -84,19 +84,34 @@ class TmuxHookSource(HookSource):
         logger.info("[TmuxHook] Focus 监听已停止")
 
     async def _poll_focus(self) -> None:
-        """轮询 tmux 活跃 pane"""
-        try:
-            while True:
+        """轮询 tmux 活跃 pane
+
+        使用 try/except 包裹每次轮询，避免单次错误终止整个轮询循环。
+        """
+        consecutive_errors = 0
+        max_consecutive_errors = 5
+
+        while True:
+            try:
                 pane_id = await self._client.get_active_pane()
                 if pane_id and pane_id != self._last_focus_pane:
                     await self._on_focus_change(pane_id)
 
-                await asyncio.sleep(self._poll_interval)
+                consecutive_errors = 0  # 成功后重置错误计数
 
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            logger.error(f"[TmuxHook] Focus 轮询异常: {e}")
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                consecutive_errors += 1
+                logger.error(f"[TmuxHook] Focus 轮询异常 ({consecutive_errors}/{max_consecutive_errors}): {e}")
+
+                # 连续多次错误后增加等待时间（指数退避）
+                if consecutive_errors >= max_consecutive_errors:
+                    logger.warning("[TmuxHook] 连续错误过多，增加轮询间隔")
+                    await asyncio.sleep(self._poll_interval * 5)
+                    consecutive_errors = 0  # 重置后继续
+
+            await asyncio.sleep(self._poll_interval)
 
     async def _on_focus_change(self, pane_id: str) -> None:
         """处理 focus 变化（带防抖）
@@ -105,11 +120,12 @@ class TmuxHookSource(HookSource):
             pane_id: 新 focus 的 pane_id
         """
         # 取消之前的防抖任务
-        if self._debounce_task:
+        if self._debounce_task and not self._debounce_task.done():
             self._debounce_task.cancel()
             try:
                 await self._debounce_task
-            except asyncio.CancelledError:
+            except Exception:
+                # 忽略所有异常（包括 CancelledError 和其他任务失败）
                 pass
 
         self._last_focus_pane = pane_id

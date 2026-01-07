@@ -22,14 +22,20 @@ class TmuxAdapter:
 
     name: str = "tmux"
 
-    def __init__(self, socket_path: str | None = None):
+    def __init__(
+        self,
+        socket_path: str | None = None,
+        exclude_names: list[str] | None = None,
+    ):
         """Initialize TmuxAdapter.
 
         Args:
             socket_path: Optional tmux socket path.
+            exclude_names: List of pane names to exclude (substring match).
         """
         self._client = TmuxClient(socket_path=socket_path)
-        self._layout_builder = TmuxLayoutBuilder()
+        self._exclude_names = exclude_names or []
+        self._layout_builder = TmuxLayoutBuilder(exclude_names=self._exclude_names)
 
     @property
     def client(self) -> TmuxClient:
@@ -74,10 +80,13 @@ class TmuxAdapter:
         if info is None:
             return None
 
+        current_command = info.get("current_command", "")
         return JobMetadata(
-            job_name=info.get("current_command", "").split()[0] if info.get("current_command") else "",
+            job_name=current_command.split()[0] if current_command else "",
             path=info.get("path", ""),
-            command_line=info.get("current_command", ""),
+            command_line=current_command,
+            job_pid=info.get("pane_pid"),
+            tty=info.get("pane_tty"),
         )
 
     async def activate_pane(self, pane_id: str) -> bool:

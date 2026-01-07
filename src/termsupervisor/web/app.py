@@ -4,18 +4,20 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
-import iterm2
 import uvicorn
 
 from termsupervisor import config
 from termsupervisor.adapters import TerminalAdapter
+from termsupervisor.adapters.factory import create_adapter, detect_terminal_type
 from termsupervisor.adapters.iterm2 import ITerm2Adapter
 from termsupervisor.render import RenderPipeline
-from termsupervisor.runtime import RuntimeComponents, bootstrap
+from termsupervisor.runtime import RuntimeComponents, bootstrap, bootstrap_tmux
 from termsupervisor.state import PaneStatusInfo
 from termsupervisor.web.server import WebServer
 
 if TYPE_CHECKING:
+    import iterm2
+
     from termsupervisor.adapters.iterm2 import ITerm2Client
 
 logger = logging.getLogger(__name__)
@@ -39,8 +41,10 @@ def create_app(
     return WebServer(pipeline, adapter=adapter, iterm_client=iterm_client)
 
 
-async def setup_hook_system(server: WebServer, connection: iterm2.Connection) -> RuntimeComponents:
-    """设置 Hook 系统
+async def setup_hook_system_iterm2(
+    server: WebServer, connection: "iterm2.Connection"
+) -> RuntimeComponents:
+    """设置 iTerm2 模式的 Hook 系统
 
     使用 runtime.bootstrap 创建组件。
 
@@ -48,6 +52,28 @@ async def setup_hook_system(server: WebServer, connection: iterm2.Connection) ->
         RuntimeComponents 包含所有组件
     """
     components = bootstrap(connection)
+    _configure_hook_callbacks(server, components)
+    return components
+
+
+async def setup_hook_system_tmux(server: WebServer) -> RuntimeComponents:
+    """设置 tmux 模式的 Hook 系统
+
+    使用 runtime.bootstrap_tmux 创建组件。
+
+    Returns:
+        RuntimeComponents 包含所有组件
+    """
+    from termsupervisor.adapters.tmux import TmuxClient
+
+    tmux_client = TmuxClient()
+    components = bootstrap_tmux(tmux_client)
+    _configure_hook_callbacks(server, components)
+    return components
+
+
+def _configure_hook_callbacks(server: WebServer, components: RuntimeComponents) -> None:
+    """配置 Hook 系统回调"""
 
     # 设置状态变更回调 -> 广播到前端
     async def on_status_change(pane_id: str, status, reason: str, source: str):
@@ -77,15 +103,11 @@ async def setup_hook_system(server: WebServer, connection: iterm2.Connection) ->
     # 设置到 WebServer
     server.setup_hook_receiver(components.receiver)
 
-    # 启动 sources
-    await components.start_sources()
-
-    logger.info("[HookSystem] Hook 系统已初始化 (via bootstrap)")
-    return components
+    logger.info(f"[HookSystem] Hook 系统已配置 (mode={components.terminal_type})")
 
 
-async def start_server(connection: iterm2.Connection):
-    """启动服务器"""
+async def start_server_iterm2(connection: "iterm2.Connection"):
+    """启动 iTerm2 模式服务器"""
     # Create adapter wrapping iTerm2 connection
     adapter = ITerm2Adapter(connection, exclude_names=config.EXCLUDE_NAMES)
     iterm_client = adapter.client  # Access underlying client for iTerm2-specific ops
@@ -98,7 +120,8 @@ async def start_server(connection: iterm2.Connection):
     server = create_app(pipeline, adapter=adapter, iterm_client=iterm_client)
 
     # 初始化 Hook 系统（状态管理的唯一来源）
-    components = await setup_hook_system(server, connection)
+    components = await setup_hook_system_iterm2(server, connection)
+    await components.start_sources()
     print("[HookSystem] Hook 系统已启动 (Shell + Claude Code + iTerm Focus)")
 
     # 设置 pipeline 的状态提供者（用于 get_layout_dict 获取状态信息）
@@ -122,19 +145,24 @@ async def start_server(connection: iterm2.Connection):
 
     pipeline_task = asyncio.create_task(pipeline.run())
 
-    # 定期同步 session 列表到 Shell Hook Source
-    async def sync_sessions():
-        while True:
-            try:
-                session_ids = pipeline.get_pane_ids()
-                await components.shell_source.sync_sessions(session_ids)
-            except Exception as e:
-                logger.error(f"[HookSystem] 同步 sessions 失败: {e}")
-            await asyncio.sleep(config.POLL_INTERVAL)
+    # 定期同步 session 列表到 Shell Hook Source (iTerm2 only)
+    sync_task = None
+    if components.shell_source:
 
-    sync_task = asyncio.create_task(sync_sessions())
+        async def sync_sessions():
+            while True:
+                try:
+                    session_ids = pipeline.get_pane_ids()
+                    await components.shell_source.sync_sessions(session_ids)
+                except Exception as e:
+                    logger.error(f"[HookSystem] 同步 sessions 失败: {e}")
+                await asyncio.sleep(config.POLL_INTERVAL)
 
-    uvicorn_config = uvicorn.Config(server.app, host="0.0.0.0", port=8765, log_level="info")
+        sync_task = asyncio.create_task(sync_sessions())
+
+    uvicorn_config = uvicorn.Config(
+        server.app, host="0.0.0.0", port=8765, log_level="info"
+    )
     uvicorn_server = uvicorn.Server(uvicorn_config)
 
     print("TermSupervisor Web Server starting at http://localhost:8765")
@@ -144,13 +172,87 @@ async def start_server(connection: iterm2.Connection):
     finally:
         pipeline.stop()
         pipeline_task.cancel()
-        sync_task.cancel()
+        if sync_task:
+            sync_task.cancel()
+        await components.stop_sources()
+
+
+async def start_server_tmux():
+    """启动 tmux 模式服务器"""
+    from termsupervisor.adapters.tmux import TmuxAdapter
+
+    # Create tmux adapter with exclude_names
+    adapter = TmuxAdapter(exclude_names=config.EXCLUDE_NAMES)
+
+    pipeline = RenderPipeline(
+        adapter=adapter,
+        exclude_names=config.EXCLUDE_NAMES,
+    )
+
+    server = create_app(pipeline, adapter=adapter, iterm_client=None)
+
+    # 初始化 Hook 系统（状态管理的唯一来源）
+    components = await setup_hook_system_tmux(server)
+    await components.start_sources()
+    print("[HookSystem] Hook 系统已启动 (Claude Code + Tmux Focus)")
+
+    # 设置 pipeline 的状态提供者
+    def get_pane_status(pane_id: str) -> PaneStatusInfo | None:
+        """获取 pane 状态信息"""
+        state = components.hook_manager.get_state(pane_id)
+        if state:
+            status = state.status
+            return PaneStatusInfo(
+                status=status.value,
+                status_color=status.color,
+                status_reason=state.description,
+                is_running=status.is_running,
+                needs_notification=status.needs_notification,
+                needs_attention=status.needs_attention,
+                display=status.display,
+            )
+        return None
+
+    pipeline.set_status_provider(get_pane_status)
+
+    pipeline_task = asyncio.create_task(pipeline.run())
+
+    uvicorn_config = uvicorn.Config(
+        server.app, host="0.0.0.0", port=8765, log_level="info"
+    )
+    uvicorn_server = uvicorn.Server(uvicorn_config)
+
+    print("TermSupervisor Web Server starting at http://localhost:8765 (tmux mode)")
+
+    try:
+        await uvicorn_server.serve()
+    finally:
+        pipeline.stop()
+        pipeline_task.cancel()
         await components.stop_sources()
 
 
 def main():
-    """入口函数"""
+    """入口函数
+
+    根据 TERMINAL_ADAPTER 配置选择启动模式：
+    - "iterm2": 使用 iTerm2 Python API
+    - "tmux": 使用 tmux subprocess 命令
+    - "auto": 根据环境自动检测
+    """
+    terminal_type = config.TERMINAL_ADAPTER
+    if terminal_type == "auto":
+        terminal_type = detect_terminal_type()
+
+    print(f"[TermSupervisor] Starting in {terminal_type} mode...")
+
     try:
-        iterm2.run_until_complete(start_server)
+        if terminal_type == "tmux":
+            asyncio.run(start_server_tmux())
+        else:
+            # iTerm2 mode (default)
+            import iterm2
+
+            iterm2.run_until_complete(start_server_iterm2)
     except KeyboardInterrupt:
         print("\nServer stopped")

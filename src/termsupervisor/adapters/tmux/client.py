@@ -5,6 +5,12 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Use tab as delimiter to avoid conflicts with colons in data (paths, names)
+_FIELD_SEP = "\t"
+
+# Default number of lines to capture from pane
+DEFAULT_CAPTURE_LINES = 30
+
 
 class TmuxClient:
     """Client for interacting with tmux via subprocess commands.
@@ -47,7 +53,7 @@ class TmuxClient:
             stdout, stderr = await proc.communicate()
 
             if proc.returncode != 0:
-                logger.debug(f"tmux command failed: {stderr.decode()}")
+                logger.warning(f"tmux command failed: {' '.join(cmd)}: {stderr.decode()}")
                 return None
 
             return stdout.decode()
@@ -68,8 +74,11 @@ class TmuxClient:
             - height: int
             - active: bool
         """
-        # Format: session_id:window_id:window_name:width:height:active_flag
-        fmt = "#{session_id}:#{window_id}:#{window_name}:#{window_width}:#{window_height}:#{window_active}"
+        # Use tab delimiter to avoid conflicts with colons in window names
+        fmt = _FIELD_SEP.join([
+            "#{session_id}", "#{window_id}", "#{window_name}",
+            "#{window_width}", "#{window_height}", "#{window_active}"
+        ])
         output = await self.run("list-windows", "-a", "-F", fmt)
 
         if not output:
@@ -79,18 +88,21 @@ class TmuxClient:
         for line in output.strip().split("\n"):
             if not line:
                 continue
-            parts = line.split(":")
+            parts = line.split(_FIELD_SEP)
             if len(parts) >= 6:
-                windows.append(
-                    {
-                        "session_id": parts[0],
-                        "window_id": parts[1],
-                        "window_name": parts[2],
-                        "width": int(parts[3]),
-                        "height": int(parts[4]),
-                        "active": parts[5] == "1",
-                    }
-                )
+                try:
+                    windows.append(
+                        {
+                            "session_id": parts[0],
+                            "window_id": parts[1],
+                            "window_name": parts[2],
+                            "width": int(parts[3]),
+                            "height": int(parts[4]),
+                            "active": parts[5] == "1",
+                        }
+                    )
+                except (ValueError, IndexError) as e:
+                    logger.warning(f"Failed to parse window line: {line!r}: {e}")
 
         return windows
 
@@ -109,9 +121,15 @@ class TmuxClient:
             - height: int
             - active: bool
             - path: str
+            - pane_pid: int (optional)
+            - pane_tty: str (optional)
         """
-        # Format: pane_id:session_id:window_id:pane_title:pane_left:pane_top:width:height:active:path
-        fmt = "#{pane_id}:#{session_id}:#{window_id}:#{pane_title}:#{pane_left}:#{pane_top}:#{pane_width}:#{pane_height}:#{pane_active}:#{pane_current_path}"
+        # Use tab delimiter to avoid conflicts with colons in paths/titles
+        fmt = _FIELD_SEP.join([
+            "#{pane_id}", "#{session_id}", "#{window_id}", "#{pane_title}",
+            "#{pane_left}", "#{pane_top}", "#{pane_width}", "#{pane_height}",
+            "#{pane_active}", "#{pane_current_path}", "#{pane_pid}", "#{pane_tty}"
+        ])
         output = await self.run("list-panes", "-a", "-F", fmt)
 
         if not output:
@@ -121,10 +139,10 @@ class TmuxClient:
         for line in output.strip().split("\n"):
             if not line:
                 continue
-            parts = line.split(":")
+            parts = line.split(_FIELD_SEP)
             if len(parts) >= 10:
-                panes.append(
-                    {
+                try:
+                    pane_data = {
                         "pane_id": parts[0],
                         "session_id": parts[1],
                         "window_id": parts[2],
@@ -136,16 +154,25 @@ class TmuxClient:
                         "active": parts[8] == "1",
                         "path": parts[9],
                     }
-                )
+                    # Optional fields for JobMetadata
+                    if len(parts) >= 11 and parts[10]:
+                        pane_data["pane_pid"] = int(parts[10])
+                    if len(parts) >= 12 and parts[11]:
+                        pane_data["pane_tty"] = parts[11]
+                    panes.append(pane_data)
+                except (ValueError, IndexError) as e:
+                    logger.warning(f"Failed to parse pane line: {line!r}: {e}")
 
         return panes
 
-    async def capture_pane(self, pane_id: str, lines: int = 30) -> str | None:
+    async def capture_pane(
+        self, pane_id: str, lines: int = DEFAULT_CAPTURE_LINES
+    ) -> str | None:
         """Capture content from a pane.
 
         Args:
             pane_id: The pane identifier (e.g., "%0")
-            lines: Number of lines to capture (from bottom)
+            lines: Number of lines to capture (from bottom). Default is 30.
 
         Returns:
             Pane content string, or None on failure.
@@ -202,22 +229,35 @@ class TmuxClient:
             pane_id: The pane identifier
 
         Returns:
-            Dict with pane_id, pane_name, path, current_command, or None if not found.
+            Dict with pane_id, pane_name, path, current_command, pane_pid, pane_tty,
+            or None if not found.
         """
-        # Format: pane_id:pane_title:path:current_command
-        fmt = "#{pane_id}:#{pane_title}:#{pane_current_path}:#{pane_current_command}"
+        # Use tab delimiter to avoid conflicts with colons in paths/commands
+        fmt = _FIELD_SEP.join([
+            "#{pane_id}", "#{pane_title}", "#{pane_current_path}",
+            "#{pane_current_command}", "#{pane_pid}", "#{pane_tty}"
+        ])
         output = await self.run("display-message", "-t", pane_id, "-p", fmt)
 
         if not output:
             return None
 
-        parts = output.strip().split(":")
+        parts = output.strip().split(_FIELD_SEP)
         if len(parts) >= 4:
-            return {
+            result = {
                 "pane_id": parts[0],
                 "pane_name": parts[1],
                 "path": parts[2],
                 "current_command": parts[3],
             }
+            # Optional fields
+            if len(parts) >= 5 and parts[4]:
+                try:
+                    result["pane_pid"] = int(parts[4])
+                except ValueError:
+                    pass
+            if len(parts) >= 6 and parts[5]:
+                result["pane_tty"] = parts[5]
+            return result
 
         return None

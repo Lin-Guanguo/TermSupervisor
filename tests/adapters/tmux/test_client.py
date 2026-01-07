@@ -77,11 +77,8 @@ class TestTmuxClient:
         """Test listing tmux windows."""
         client = TmuxClient()
 
-        # Sample tmux list-windows -a -F output
-        output = """0:0:bash:80:24:0
-0:1:vim:80:24:1
-1:0:zsh:120:30:0
-"""
+        # Sample tmux list-windows -a -F output (tab-delimited)
+        output = "0\t0\tbash\t80\t24\t0\n0\t1\tvim\t80\t24\t1\n1\t0\tzsh\t120\t30\t0\n"
         with patch.object(client, "run", return_value=output):
             windows = await client.list_windows()
 
@@ -98,6 +95,19 @@ class TestTmuxClient:
             assert windows[2]["session_id"] == "1"
 
     @pytest.mark.asyncio
+    async def test_list_windows_with_colons(self):
+        """Test listing windows with colons in window name."""
+        client = TmuxClient()
+
+        # Window name contains colon (e.g., "my:project")
+        output = "0\t0\tmy:project\t80\t24\t1\n"
+        with patch.object(client, "run", return_value=output):
+            windows = await client.list_windows()
+
+            assert len(windows) == 1
+            assert windows[0]["window_name"] == "my:project"
+
+    @pytest.mark.asyncio
     async def test_list_windows_empty(self):
         """Test listing windows when tmux returns nothing."""
         client = TmuxClient()
@@ -111,29 +121,43 @@ class TestTmuxClient:
         """Test listing tmux panes."""
         client = TmuxClient()
 
-        # Sample tmux list-panes -a -F output
-        output = """%0:0:0:bash:0:0:80:24:1:/home/user
-%1:0:0:vim:80:0:80:24:0:/home/user/project
-%2:1:0:zsh:0:0:120:30:1:/tmp
-"""
+        # Sample tmux list-panes -a -F output (tab-delimited, 12 fields with pid/tty)
+        output = (
+            "%0\t0\t0\tbash\t0\t0\t80\t24\t1\t/home/user\t12345\t/dev/ttys001\n"
+            "%1\t0\t0\tvim\t80\t0\t80\t24\t0\t/home/user/project\t12346\t/dev/ttys002\n"
+            "%2\t1\t0\tzsh\t0\t0\t120\t30\t1\t/tmp\t12347\t/dev/ttys003\n"
+        )
         with patch.object(client, "run", return_value=output):
             panes = await client.list_panes()
 
             assert len(panes) == 3
-            assert panes[0] == {
-                "pane_id": "%0",
-                "session_id": "0",
-                "window_id": "0",
-                "pane_name": "bash",
-                "x": 0,
-                "y": 0,
-                "width": 80,
-                "height": 24,
-                "active": True,
-                "path": "/home/user",
-            }
+            assert panes[0]["pane_id"] == "%0"
+            assert panes[0]["session_id"] == "0"
+            assert panes[0]["window_id"] == "0"
+            assert panes[0]["pane_name"] == "bash"
+            assert panes[0]["x"] == 0
+            assert panes[0]["y"] == 0
+            assert panes[0]["width"] == 80
+            assert panes[0]["height"] == 24
+            assert panes[0]["active"] is True
+            assert panes[0]["path"] == "/home/user"
+            assert panes[0]["pane_pid"] == 12345
+            assert panes[0]["pane_tty"] == "/dev/ttys001"
             assert panes[1]["active"] is False
             assert panes[2]["path"] == "/tmp"
+
+    @pytest.mark.asyncio
+    async def test_list_panes_with_colons(self):
+        """Test listing panes with colons in path."""
+        client = TmuxClient()
+
+        # Path contains colon (e.g., "/home/user/code:project")
+        output = "%0\t0\t0\tbash\t0\t0\t80\t24\t1\t/home/user/code:project\t123\t/dev/pts/0\n"
+        with patch.object(client, "run", return_value=output):
+            panes = await client.list_panes()
+
+            assert len(panes) == 1
+            assert panes[0]["path"] == "/home/user/code:project"
 
     @pytest.mark.asyncio
     async def test_list_panes_empty(self):
@@ -261,7 +285,8 @@ $ _
         """Test getting info for a specific pane."""
         client = TmuxClient()
 
-        output = "%0:bash:/home/user:vim file.txt\n"
+        # Tab-delimited output with pid and tty
+        output = "%0\tbash\t/home/user\tvim file.txt\t12345\t/dev/ttys001\n"
         with patch.object(client, "run", return_value=output):
             result = await client.get_pane_info("%0")
 
@@ -270,6 +295,22 @@ $ _
             assert result["pane_name"] == "bash"
             assert result["path"] == "/home/user"
             assert result["current_command"] == "vim file.txt"
+            assert result["pane_pid"] == 12345
+            assert result["pane_tty"] == "/dev/ttys001"
+
+    @pytest.mark.asyncio
+    async def test_get_pane_info_with_colons(self):
+        """Test getting pane info with colons in path/command."""
+        client = TmuxClient()
+
+        # Path and command contain colons
+        output = "%0\tbash\t/home/user:project\tvim file.txt:100\t123\t/dev/pts/0\n"
+        with patch.object(client, "run", return_value=output):
+            result = await client.get_pane_info("%0")
+
+            assert result is not None
+            assert result["path"] == "/home/user:project"
+            assert result["current_command"] == "vim file.txt:100"
 
     @pytest.mark.asyncio
     async def test_get_pane_info_not_found(self):

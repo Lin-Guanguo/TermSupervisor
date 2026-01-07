@@ -3,24 +3,29 @@
 职责：
 - 创建 HookManager, 各 Source, Receiver
 - 返回 RuntimeComponents 供调用方使用
+- 支持 iTerm2 和 tmux 两种终端模式
 
 不负责：
 - 启动/停止生命周期（由调用方管理）
 - Supervisor/WebServer 创建（独立于 hook 系统）
 """
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Protocol
 
 from ..hooks.manager import HookManager
 from ..hooks.receiver import HookReceiver
+from ..hooks.sources.base import HookSource
 from ..hooks.sources.claude_code import ClaudeCodeHookSource
 from ..hooks.sources.iterm import ItermHookSource
 from ..hooks.sources.shell import ShellHookSource
+from ..hooks.sources.tmux import TmuxHookSource
 from ..telemetry import get_logger
 
 if TYPE_CHECKING:
     import iterm2
+
+    from ..adapters.tmux import TmuxClient
 
 logger = get_logger(__name__)
 
@@ -30,31 +35,57 @@ _current_components: "RuntimeComponents | None" = None
 
 @dataclass
 class RuntimeComponents:
-    """Bootstrap 返回的运行时组件集合"""
+    """Bootstrap 返回的运行时组件集合
+
+    支持 iTerm2 和 tmux 两种终端模式。
+    shell_source 仅在 iTerm2 模式下可用（依赖 PromptMonitor）。
+    """
 
     hook_manager: HookManager
     receiver: HookReceiver
-    shell_source: ShellHookSource
     claude_code_source: ClaudeCodeHookSource
-    iterm_source: ItermHookSource
+    terminal_type: str  # "iterm2" or "tmux"
+
+    # iTerm2-specific sources (None in tmux mode)
+    shell_source: ShellHookSource | None = None
+    iterm_source: ItermHookSource | None = None
+
+    # tmux-specific sources (None in iTerm2 mode)
+    tmux_source: TmuxHookSource | None = None
 
     async def start_sources(self) -> None:
         """启动所有 source（Supervisor 启动后调用）"""
-        await self.shell_source.start()
         await self.claude_code_source.start()
-        await self.iterm_source.start()
-        logger.info("[Bootstrap] All sources started")
+
+        if self.terminal_type == "iterm2":
+            if self.shell_source:
+                await self.shell_source.start()
+            if self.iterm_source:
+                await self.iterm_source.start()
+        elif self.terminal_type == "tmux":
+            if self.tmux_source:
+                await self.tmux_source.start()
+
+        logger.info(f"[Bootstrap] All sources started (mode={self.terminal_type})")
 
     async def stop_sources(self) -> None:
         """停止所有 source"""
-        await self.shell_source.stop()
         await self.claude_code_source.stop()
-        await self.iterm_source.stop()
-        logger.info("[Bootstrap] All sources stopped")
+
+        if self.terminal_type == "iterm2":
+            if self.shell_source:
+                await self.shell_source.stop()
+            if self.iterm_source:
+                await self.iterm_source.stop()
+        elif self.terminal_type == "tmux":
+            if self.tmux_source:
+                await self.tmux_source.stop()
+
+        logger.info(f"[Bootstrap] All sources stopped (mode={self.terminal_type})")
 
 
 def bootstrap(connection: "iterm2.Connection") -> RuntimeComponents:
-    """构造运行时组件
+    """构造 iTerm2 模式的运行时组件
 
     Args:
         connection: iTerm2 连接
@@ -82,14 +113,62 @@ def bootstrap(connection: "iterm2.Connection") -> RuntimeComponents:
     receiver = HookReceiver(hook_manager)
     receiver.register_adapter(claude_code_source)
 
-    logger.info("[Bootstrap] Components created")
+    logger.info("[Bootstrap] iTerm2 components created")
 
     _current_components = RuntimeComponents(
         hook_manager=hook_manager,
         receiver=receiver,
-        shell_source=shell_source,
         claude_code_source=claude_code_source,
+        terminal_type="iterm2",
+        shell_source=shell_source,
         iterm_source=iterm_source,
     )
 
     return _current_components
+
+
+def bootstrap_tmux(tmux_client: "TmuxClient") -> RuntimeComponents:
+    """构造 tmux 模式的运行时组件
+
+    Args:
+        tmux_client: TmuxClient 实例
+
+    Returns:
+        RuntimeComponents 包含所有构造好的组件
+
+    Raises:
+        RuntimeError: 如果已经调用过 bootstrap（防止双重构造）
+    """
+    global _current_components
+
+    if _current_components is not None:
+        raise RuntimeError("bootstrap() has already been called.")
+
+    # 1. 创建 HookManager
+    hook_manager = HookManager()
+
+    # 2. 创建 Sources (Claude Code + Tmux focus)
+    claude_code_source = ClaudeCodeHookSource(hook_manager)
+    tmux_source = TmuxHookSource(hook_manager, tmux_client)
+
+    # 3. 创建 Receiver 并注册适配器
+    receiver = HookReceiver(hook_manager)
+    receiver.register_adapter(claude_code_source)
+
+    logger.info("[Bootstrap] Tmux components created")
+
+    _current_components = RuntimeComponents(
+        hook_manager=hook_manager,
+        receiver=receiver,
+        claude_code_source=claude_code_source,
+        terminal_type="tmux",
+        tmux_source=tmux_source,
+    )
+
+    return _current_components
+
+
+def reset_bootstrap() -> None:
+    """Reset bootstrap state (for testing only)."""
+    global _current_components
+    _current_components = None

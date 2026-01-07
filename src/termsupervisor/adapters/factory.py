@@ -62,6 +62,6 @@ def create_adapter(
     if adapter_type == "tmux":
         from termsupervisor.adapters.tmux import TmuxAdapter
 
-        return TmuxAdapter(socket_path=socket_path)
+        return TmuxAdapter(socket_path=socket_path, exclude_names=exclude_names)
 
     raise ValueError(f"Unknown adapter type: {adapter_type}")
