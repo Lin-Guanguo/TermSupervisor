@@ -80,6 +80,48 @@ class WebServer:
         """布局更新回调"""
         await self.broadcast(self.pipeline.get_layout_dict())
 
+    async def _render_tmux_pane_svg(self, pane_id: str) -> Response:
+        """Render tmux pane content to SVG.
+
+        Args:
+            pane_id: Namespaced tmux pane ID (e.g., "tmux:%0")
+
+        Returns:
+            Response with SVG content or error
+        """
+        from termsupervisor.adapters.composite import CompositeAdapter
+        from termsupervisor.core.ids import get_native_id
+
+        # Check if adapter supports tmux
+        if not isinstance(self.adapter, CompositeAdapter):
+            return Response(
+                content="tmux rendering requires composite adapter",
+                status_code=501,
+                media_type="text/plain",
+            )
+
+        native_id = get_native_id(pane_id)
+
+        try:
+            # Get content with ANSI escape sequences
+            content = await self.adapter._tmux_client.capture_pane(
+                native_id, lines=50, escape=True
+            )
+            if not content:
+                return Response(
+                    content="Pane not found", status_code=404, media_type="text/plain"
+                )
+
+            # Render to SVG
+            svg = self._renderer.render_ansi_text(content, width=120, height=50)
+            return Response(
+                content=svg, media_type="image/svg+xml", headers={"Cache-Control": "no-cache"}
+            )
+        except Exception as e:
+            return Response(
+                content=f"Render error: {e}", status_code=500, media_type="text/plain"
+            )
+
     def _setup_routes(self):
         @self.app.get("/", response_class=HTMLResponse)
         async def index(request: Request):
@@ -89,8 +131,15 @@ class WebServer:
         async def get_pane_svg(pane_id: str):
             """获取指定 pane 的 SVG 渲染图。
 
-            Note: SVG rendering is only available for iTerm2.
+            Supports both iTerm2 and tmux panes in composite mode.
             """
+            from termsupervisor.core.ids import get_native_id, is_iterm2_id, is_tmux_id
+
+            # Handle tmux panes - render via ANSI capture
+            if is_tmux_id(pane_id):
+                return await self._render_tmux_pane_svg(pane_id)
+
+            # Handle iTerm2 panes
             if not self.iterm_client:
                 return Response(
                     content="SVG rendering not available for this terminal",
@@ -98,7 +147,9 @@ class WebServer:
                     media_type="text/plain",
                 )
 
-            session = await self.iterm_client.get_session_by_id(pane_id)
+            # Extract native ID for iTerm2 panes
+            native_id = get_native_id(pane_id) if is_iterm2_id(pane_id) else pane_id
+            session = await self.iterm_client.get_session_by_id(native_id)
             if not session:
                 return Response(
                     content="Session not found", status_code=404, media_type="text/plain"

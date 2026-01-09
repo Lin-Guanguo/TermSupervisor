@@ -166,13 +166,14 @@ class TmuxClient:
         return panes
 
     async def capture_pane(
-        self, pane_id: str, lines: int = DEFAULT_CAPTURE_LINES
+        self, pane_id: str, lines: int = DEFAULT_CAPTURE_LINES, escape: bool = False
     ) -> str | None:
         """Capture content from a pane.
 
         Args:
             pane_id: The pane identifier (e.g., "%0")
             lines: Number of lines to capture (from bottom). Default is 30.
+            escape: If True, include ANSI escape sequences for colors/styles.
 
         Returns:
             Pane content string, or None on failure.
@@ -180,9 +181,11 @@ class TmuxClient:
         # capture-pane -t pane_id -p -S -lines
         # -p: print to stdout
         # -S: start line (negative = from bottom)
-        output = await self.run(
-            "capture-pane", "-t", pane_id, "-p", "-S", f"-{lines}"
-        )
+        # -e: include escape sequences (ANSI colors)
+        args = ["capture-pane", "-t", pane_id, "-p", "-S", f"-{lines}"]
+        if escape:
+            args.append("-e")
+        output = await self.run(*args)
         return output
 
     async def select_pane(self, pane_id: str) -> bool:
@@ -261,3 +264,54 @@ class TmuxClient:
             return result
 
         return None
+
+    async def list_clients(self) -> list[dict]:
+        """List all tmux clients (attached terminals).
+
+        Used for composite mode to detect which iTerm2 panes are running tmux.
+
+        Returns:
+            List of client dicts with keys:
+            - client_tty: str (e.g., "/dev/ttys001")
+            - client_session: str (session name)
+            - client_width: int
+            - client_height: int
+        """
+        fmt = _FIELD_SEP.join([
+            "#{client_tty}", "#{client_session}",
+            "#{client_width}", "#{client_height}"
+        ])
+        output = await self.run("list-clients", "-F", fmt)
+
+        if not output:
+            return []
+
+        clients = []
+        for line in output.strip().split("\n"):
+            if not line:
+                continue
+            parts = line.split(_FIELD_SEP)
+            if len(parts) >= 4:
+                try:
+                    clients.append({
+                        "client_tty": parts[0],
+                        "client_session": parts[1],
+                        "client_width": int(parts[2]),
+                        "client_height": int(parts[3]),
+                    })
+                except (ValueError, IndexError) as e:
+                    logger.warning(f"Failed to parse client line: {line!r}: {e}")
+
+        return clients
+
+    async def select_window(self, target: str) -> bool:
+        """Select/activate a tmux window.
+
+        Args:
+            target: Window target (e.g., "session:window" or "@1")
+
+        Returns:
+            True on success, False on failure.
+        """
+        result = await self.run("select-window", "-t", target)
+        return result is not None

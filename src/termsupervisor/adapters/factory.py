@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     import iterm2
 
     from termsupervisor.adapters.base import TerminalAdapter
+    from termsupervisor.adapters.composite import CompositeAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,27 @@ def detect_terminal_type() -> str:
     return "iterm2"
 
 
+def is_tmux_available() -> bool:
+    """Check if tmux is available and has active sessions.
+
+    Used to determine if composite mode should be enabled.
+
+    Returns:
+        True if tmux is running with at least one session.
+    """
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["tmux", "list-sessions"],
+            capture_output=True,
+            timeout=2,
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+
+
 def create_adapter(
     adapter_type: str | None = None,
     connection: "iterm2.Connection | None" = None,
@@ -34,8 +56,9 @@ def create_adapter(
     """Create a terminal adapter.
 
     Args:
-        adapter_type: Adapter type ("iterm2", "tmux", "auto"). Default from config.
-        connection: iTerm2 connection (required for iterm2 adapter)
+        adapter_type: Adapter type ("iterm2", "tmux", "composite", "auto").
+                      Default from config.
+        connection: iTerm2 connection (required for iterm2/composite adapter)
         socket_path: Tmux socket path (optional for tmux adapter)
         exclude_names: Pane/tab names to exclude
 
@@ -64,4 +87,45 @@ def create_adapter(
 
         return TmuxAdapter(socket_path=socket_path, exclude_names=exclude_names)
 
+    if adapter_type == "composite":
+        if connection is None:
+            raise ValueError("Composite adapter requires iTerm2 connection")
+        return create_composite_adapter(
+            connection=connection,
+            socket_path=socket_path,
+            exclude_names=exclude_names,
+        )
+
     raise ValueError(f"Unknown adapter type: {adapter_type}")
+
+
+def create_composite_adapter(
+    connection: "iterm2.Connection",
+    socket_path: str | None = None,
+    exclude_names: list[str] | None = None,
+) -> "CompositeAdapter":
+    """Create a composite adapter combining iTerm2 and tmux.
+
+    Args:
+        connection: iTerm2 connection
+        socket_path: Optional tmux socket path
+        exclude_names: Pane/tab names to exclude
+
+    Returns:
+        CompositeAdapter instance
+    """
+    from termsupervisor.adapters.composite import CompositeAdapter
+    from termsupervisor.adapters.iterm2 import ITerm2Adapter
+    from termsupervisor.adapters.tmux import TmuxAdapter
+    from termsupervisor.adapters.tmux.client import TmuxClient
+
+    iterm2_adapter = ITerm2Adapter(connection, exclude_names=exclude_names)
+    tmux_client = TmuxClient(socket_path=socket_path)
+    tmux_adapter = TmuxAdapter(socket_path=socket_path, exclude_names=exclude_names)
+
+    return CompositeAdapter(
+        iterm2_adapter=iterm2_adapter,
+        tmux_adapter=tmux_adapter,
+        tmux_client=tmux_client,
+        exclude_names=exclude_names,
+    )

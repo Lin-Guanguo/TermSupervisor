@@ -216,3 +216,31 @@ class TerminalRenderer:
         console.print(rich_text, end="")
 
         return console.export_svg(title="")
+
+    def render_ansi_text(self, text: str, width: int = 80, height: int | None = None) -> str:
+        """Render ANSI-escaped text to SVG.
+
+        Used for tmux pane content which comes with ANSI escape sequences.
+
+        Args:
+            text: Text with ANSI escape sequences
+            width: Terminal width (characters)
+            height: Terminal height (lines)
+
+        Returns:
+            SVG string
+        """
+        # Sanitize for XML
+        text = _sanitize_for_xml(text)
+
+        console = Console(
+            record=True,
+            width=width,
+            height=height,
+            force_terminal=True,
+            color_system="truecolor",
+        )
+        # Rich Console automatically parses ANSI escape sequences
+        console.print(text, end="")
+
+        return console.export_svg(title="")

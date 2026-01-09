@@ -4,12 +4,18 @@
 - 监听 iTerm2 FocusMonitor 事件
 - 防抖处理（稳定 N 秒后才发送）
 - 通过 emit_event 发送事件（由 HookManager 处理日志/指标）
+
+Composite 模式支持：
+- 使用 namespaced pane_id（如 "iterm2:UUID"）
+- 可配置是否启用命名空间（用于区分 iTerm2 和 tmux pane）
 """
 
 import asyncio
 from typing import TYPE_CHECKING
 
 import iterm2
+
+from termsupervisor.core.ids import AdapterType, make_pane_id
 
 from ...config import FOCUS_DEBOUNCE_SECONDS
 from ...telemetry import get_logger
@@ -37,10 +43,24 @@ class ItermHookSource(HookSource):
 
     source_name = "iterm"
 
-    def __init__(self, manager: "HookManager", connection: iterm2.Connection):
+    def __init__(
+        self,
+        manager: "HookManager",
+        connection: iterm2.Connection,
+        use_namespace: bool = False,
+    ):
+        """Initialize ItermHookSource.
+
+        Args:
+            manager: HookManager instance
+            connection: iTerm2 connection
+            use_namespace: Whether to prefix pane IDs with "iterm2:" namespace.
+                          Enable this in composite mode.
+        """
         super().__init__(manager)
         self.connection = connection
         self._focus_task: asyncio.Task | None = None
+        self._use_namespace = use_namespace
 
         # 防抖状态
         self._last_focus_session: str | None = None
@@ -119,11 +139,25 @@ class ItermHookSource(HookSource):
         # 启动新的防抖任务
         self._debounce_task = asyncio.create_task(self._debounced_focus_event(session_id))
 
+    def _get_namespaced_id(self, session_id: str) -> str:
+        """Get session ID with optional namespace prefix.
+
+        Args:
+            session_id: Native iTerm2 session ID
+
+        Returns:
+            Namespaced ID if use_namespace is True (e.g., "iterm2:UUID"),
+            otherwise returns the original session_id.
+        """
+        if self._use_namespace:
+            return make_pane_id(AdapterType.ITERM2, session_id)
+        return session_id
+
     async def _debounced_focus_event(self, session_id: str) -> None:
         """防抖后发送 focus 事件
 
         Args:
-            session_id: focus 的 session_id
+            session_id: focus 的 session_id (native, without namespace)
         """
         try:
             # 等待防抖时间
@@ -132,12 +166,14 @@ class ItermHookSource(HookSource):
             # 确认仍然 focus 在同一个 session
             if self._last_focus_session == session_id:
                 # 更新当前 focus（用于通知抑制判断）
-                self._current_focus_session = session_id
+                # Store the namespaced version for external use
+                namespaced_id = self._get_namespaced_id(session_id)
+                self._current_focus_session = namespaced_id
 
                 # 使用 emit_event 发送，Manager 负责日志/指标
                 await self.manager.emit_event(
                     source="iterm",
-                    pane_id=session_id,
+                    pane_id=namespaced_id,
                     event_type="focus",
                 )
 

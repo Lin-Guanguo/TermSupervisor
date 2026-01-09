@@ -4,12 +4,17 @@
 - 轮询 tmux 当前活跃 pane
 - 防抖处理（稳定 N 秒后才发送）
 - 通过 emit_event 发送事件（由 HookManager 处理日志/指标）
+
+Composite 模式支持：
+- 使用 namespaced pane_id（如 "tmux:%0"）
+- 可配置是否启用命名空间（用于区分 iTerm2 和 tmux pane）
 """
 
 import asyncio
 from typing import TYPE_CHECKING
 
 from termsupervisor.adapters.tmux import TmuxClient
+from termsupervisor.core.ids import AdapterType, make_pane_id
 
 from ...config import FOCUS_DEBOUNCE_SECONDS, POLL_INTERVAL
 from ...telemetry import get_logger
@@ -42,11 +47,22 @@ class TmuxHookSource(HookSource):
         manager: "HookManager",
         client: TmuxClient | None = None,
         poll_interval: float | None = None,
+        use_namespace: bool = False,
     ):
+        """Initialize TmuxHookSource.
+
+        Args:
+            manager: HookManager instance
+            client: TmuxClient instance (optional)
+            poll_interval: Polling interval in seconds
+            use_namespace: Whether to prefix pane IDs with "tmux:" namespace.
+                          Enable this in composite mode.
+        """
         super().__init__(manager)
         self._client = client or TmuxClient()
         self._poll_interval = poll_interval or POLL_INTERVAL
         self._poll_task: asyncio.Task | None = None
+        self._use_namespace = use_namespace
 
         # 防抖状态
         self._last_focus_pane: str | None = None
@@ -133,11 +149,25 @@ class TmuxHookSource(HookSource):
         # 启动新的防抖任务
         self._debounce_task = asyncio.create_task(self._debounced_focus_event(pane_id))
 
+    def _get_namespaced_id(self, pane_id: str) -> str:
+        """Get pane ID with optional namespace prefix.
+
+        Args:
+            pane_id: Native tmux pane ID (e.g., "%0")
+
+        Returns:
+            Namespaced ID if use_namespace is True (e.g., "tmux:%0"),
+            otherwise returns the original pane_id.
+        """
+        if self._use_namespace:
+            return make_pane_id(AdapterType.TMUX, pane_id)
+        return pane_id
+
     async def _debounced_focus_event(self, pane_id: str) -> None:
         """防抖后发送 focus 事件
 
         Args:
-            pane_id: focus 的 pane_id
+            pane_id: focus 的 pane_id (native, without namespace)
         """
         try:
             # 等待防抖时间
@@ -146,12 +176,14 @@ class TmuxHookSource(HookSource):
             # 确认仍然 focus 在同一个 pane
             if self._last_focus_pane == pane_id:
                 # 更新当前 focus（用于通知抑制判断）
-                self._current_focus_pane = pane_id
+                # Store the namespaced version for external use
+                namespaced_id = self._get_namespaced_id(pane_id)
+                self._current_focus_pane = namespaced_id
 
                 # 使用 emit_event 发送，Manager 负责日志/指标
                 await self.manager.emit_event(
                     source="tmux",
-                    pane_id=pane_id,
+                    pane_id=namespaced_id,
                     event_type="focus",
                 )
 

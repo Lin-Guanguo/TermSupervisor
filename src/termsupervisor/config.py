@@ -12,9 +12,12 @@
 import os
 
 # === 终端适配器配置 ===
-# Options: "iterm2", "tmux", "auto"
-# "auto" detects based on environment ($TMUX for tmux, else iTerm2)
-TERMINAL_ADAPTER = os.environ.get("TERMINAL_ADAPTER", "iterm2")
+# Options: "iterm2", "tmux", "composite", "auto"
+# "auto" detects based on environment:
+#   - Pure tmux (not in iTerm2) → "tmux"
+#   - iTerm2 with tmux available → "composite" (iTerm2 + tmux integration)
+#   - iTerm2 only → "iterm2"
+TERMINAL_ADAPTER = os.environ.get("TERMINAL_ADAPTER", "auto")
 
 # === 轮询配置 ===
 POLL_INTERVAL = 1.0  # 内容读取间隔（秒）
